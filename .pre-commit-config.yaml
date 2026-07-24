@@ -1,9 +1,9 @@
 repos:
   - repo: local
     hooks:
-      - id: spotless-check
-        name: Spotless Check (Java Style Format)
-        entry: ./gradlew spotlessCheck
+      - id: spotless-apply
+        name: Spotless Apply (Auto Java Style Format)
+        entry: ./gradlew spotlessApply
         language: system
         files: \.java$
         pass_filenames: false
