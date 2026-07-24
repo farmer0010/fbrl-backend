@@ -50,6 +50,10 @@ public final class Money {
     return this.amount.compareTo(money.amount) >= 0;
   }
 
+  public BigDecimal getAmount() {
+    return amount;
+  }
+
   // vo핵심: 동등성 재정의 (주소값이 달라도 금액이 같으면 같은 객체로 취급)
   @Override
   public boolean equals(Object o) {
