@@ -1,4 +1,4 @@
-package com.fbrl.fbrl_backend;
+package com.fbrl;
 
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
