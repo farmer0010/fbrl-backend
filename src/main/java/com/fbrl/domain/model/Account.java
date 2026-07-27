@@ -5,7 +5,7 @@ import java.util.Objects;
 
 public class Account {
   private final String accountNumber;
-  private Money balance; // 잔액 (가변)
+  private Money balance;
 
   public Account(String accountNumber, Money balance) {
     this.accountNumber = Objects.requireNonNull(accountNumber, "계좌번호는 null일 수 없습니다.");
@@ -36,5 +36,18 @@ public class Account {
 
   public Money getBalance() {
     return balance;
+  }
+
+  @Override
+  public boolean equals(Object o) {
+    if (this == o) return true;
+    if (o == null || getClass() != o.getClass()) return false;
+    Account account = (Account) o;
+    return Objects.equals(accountNumber, account.accountNumber);
+  }
+
+  @Override
+  public int hashCode() {
+    return Objects.hash(accountNumber);
   }
 }
