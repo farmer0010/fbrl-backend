@@ -10,13 +10,14 @@ public class AccountMapper {
     if (entity == null) {
       return null;
     }
-    return Account.create(entity.getAccountNumber(), Money.of(entity.getBalance()));
+    return new Account(entity.getId(), entity.getAccountNumber(), Money.of(entity.getBalance()));
   }
 
   public AccountEntity toEntity(Account account) {
     if (account == null) {
       return null;
     }
-    return new AccountEntity(null, account.getAccountNumber(), account.getBalance().getAmount());
+    return new AccountEntity(
+        account.getId(), account.getAccountNumber(), account.getBalance().getAmount());
   }
 }
