@@ -39,12 +39,13 @@ class IdempotencyIntegrationTest {
 
   @BeforeEach
   void setUp() {
-    accountJpaRepository.deleteAll();
+    accountJpaRepository.deleteAllInBatch();
 
     accountPersistenceAdapter.save(
-        new Account(null, SENDER_ACCOUNT, Money.of(BigDecimal.valueOf(1_000_000))));
+        new Account(null, SENDER_ACCOUNT, Money.of(BigDecimal.valueOf(1_000_000)), null));
 
-    accountPersistenceAdapter.save(new Account(null, RECEIVER_ACCOUNT, Money.of(BigDecimal.ZERO)));
+    accountPersistenceAdapter.save(
+        new Account(null, RECEIVER_ACCOUNT, Money.of(BigDecimal.ZERO), null));
   }
 
   @Test

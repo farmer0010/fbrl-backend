@@ -32,13 +32,13 @@ class TransferConcurrencyTest {
 
   @BeforeEach
   void setUp() {
-    accountJpaRepository.deleteAll();
+    accountJpaRepository.deleteAllInBatch();
 
     accountPersistenceAdapter.save(
-        new Account(null, SENDER_ACCOUNT_NUMBER, Money.of(BigDecimal.valueOf(1_000_000))));
+        new Account(null, SENDER_ACCOUNT_NUMBER, Money.of(BigDecimal.valueOf(1_000_000)), null));
 
     accountPersistenceAdapter.save(
-        new Account(null, RECEIVER_ACCOUNT_NUMBER, Money.of(BigDecimal.ZERO)));
+        new Account(null, RECEIVER_ACCOUNT_NUMBER, Money.of(BigDecimal.ZERO), null));
   }
 
   @Test
