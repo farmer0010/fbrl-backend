@@ -7,15 +7,17 @@ public class Account {
   private final Long id;
   private final String accountNumber;
   private Money balance;
+  private final Long version;
 
-  public Account(Long id, String accountNumber, Money balance) {
+  public Account(Long id, String accountNumber, Money balance, Long version) {
     this.id = id;
     this.accountNumber = Objects.requireNonNull(accountNumber, "계좌번호는 null일 수 없습니다.");
     this.balance = Objects.requireNonNull(balance, "잔액은 null일 수 없습니다.");
+    this.version = version;
   }
 
   public static Account create(String accountNumber, Money initialBalance) {
-    return new Account(null, accountNumber, initialBalance);
+    return new Account(null, accountNumber, initialBalance, null);
   }
 
   public void deposit(Money money) {
@@ -42,6 +44,10 @@ public class Account {
 
   public Money getBalance() {
     return balance;
+  }
+
+  public Long getVersion() {
+    return version;
   }
 
   @Override

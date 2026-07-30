@@ -17,11 +17,11 @@ spring:
     database-platform: org.hibernate.dialect.MariaDBDialect
     hibernate:
       ddl-auto: update
-    show-sql: true
+    show-sql: false
     properties:
       hibernate:
-        format_sql: true
-        highlight_sql: true
+        format_sql: false
+        highlight_sql: false
 
   data:
     redis:
@@ -30,5 +30,9 @@ spring:
 
 logging:
   level:
-    com.fbrl: debug
-    org.hibernate.SQL: debug
+    root: WARN
+    com.fbrl: INFO
+    org.hibernate.SQL: OFF
+    org.hibernate.type.descriptor.sql: OFF
+    org.hibernate.orm.session: ERROR
+    org.springframework: WARN

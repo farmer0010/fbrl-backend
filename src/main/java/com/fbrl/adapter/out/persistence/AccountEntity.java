@@ -1,11 +1,6 @@
 package com.fbrl.adapter.out.persistence;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
+import jakarta.persistence.*;
 import java.math.BigDecimal;
 
 @Entity
@@ -21,12 +16,15 @@ public class AccountEntity {
   @Column(name = "balance", nullable = false)
   private BigDecimal balance;
 
+  @Version private Long version;
+
   protected AccountEntity() {}
 
-  public AccountEntity(Long id, String accountNumber, BigDecimal balance) {
+  public AccountEntity(Long id, String accountNumber, BigDecimal balance, Long version) {
     this.id = id;
     this.accountNumber = accountNumber;
     this.balance = balance;
+    this.version = version;
   }
 
   public Long getId() {
@@ -39,5 +37,13 @@ public class AccountEntity {
 
   public BigDecimal getBalance() {
     return balance;
+  }
+
+  public void setBalance(BigDecimal balance) {
+    this.balance = balance;
+  }
+
+  public Long getVersion() {
+    return version;
   }
 }

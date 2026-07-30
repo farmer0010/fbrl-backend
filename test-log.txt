@@ -1,0 +1,581 @@
+Initialized native services in: /Users/kimjuyoung/.gradle/native
+Initialized jansi services in: /Users/kimjuyoung/.gradle/native
+Found daemon DaemonInfo{pid=35618, address=[9d120c35-7e26-4709-b8d0-8bbdfc2c868a port:60602, addresses:[/127.0.0.1]], state=Idle, lastBusy=1785394329973, context=DefaultDaemonContext[uid=ce073a59-78bf-4f6b-8a0a-94d470604568,javaHome=/Users/kimjuyoung/.antigravity-ide/extensions/redhat.java-1.55.0-darwin-arm64/jre/21.0.11-macosx-aarch64,javaVersion=21,javaVendor=Eclipse Adoptium,daemonRegistryDir=/Users/kimjuyoung/.gradle/daemon,pid=35618,idleTimeout=10800000,priority=NORMAL,applyInstrumentationAgent=true,nativeServicesMode=ENABLED,daemonOpts=-XX:MaxMetaspaceSize=384m,-XX:+HeapDumpOnOutOfMemoryError,-Xms256m,-Xmx512m,-Dfile.encoding=UTF-8,-Duser.country=KR,-Duser.language=ko,-Duser.variant]} however its context does not match the desired criteria.
+JVM is incompatible.
+Wanted: DaemonRequestContext{jvmCriteria=/opt/homebrew/Cellar/openjdk@17/17.0.18/libexec/openjdk.jdk/Contents/Home (no Daemon JVM specified, using current Java home), daemonOpts=[-XX:MaxMetaspaceSize=384m, -XX:+HeapDumpOnOutOfMemoryError, -Xms256m, -Xmx512m, -Dfile.encoding=UTF-8, -Duser.country=KR, -Duser.language=ko, -Duser.variant], applyInstrumentationAgent=true, nativeServicesMode=ENABLED, priority=NORMAL}
+Actual: DefaultDaemonContext[uid=ce073a59-78bf-4f6b-8a0a-94d470604568,javaHome=/Users/kimjuyoung/.antigravity-ide/extensions/redhat.java-1.55.0-darwin-arm64/jre/21.0.11-macosx-aarch64,javaVersion=21,javaVendor=Eclipse Adoptium,daemonRegistryDir=/Users/kimjuyoung/.gradle/daemon,pid=35618,idleTimeout=10800000,priority=NORMAL,applyInstrumentationAgent=true,nativeServicesMode=ENABLED,daemonOpts=-XX:MaxMetaspaceSize=384m,-XX:+HeapDumpOnOutOfMemoryError,-Xms256m,-Xmx512m,-Dfile.encoding=UTF-8,-Duser.country=KR,-Duser.language=ko,-Duser.variant]
+
+  Looking for a different daemon...
+The client will now receive all logging from the daemon (pid: 35547). The daemon log file: /Users/kimjuyoung/.gradle/daemon/9.5.1/daemon-35547.out.log
+Starting 54th build in daemon [uptime: 4 hrs 1 mins 32.221 secs, performance: 100%, GC rate: 0.00/s, heap usage: 0% of 512 MiB, non-heap usage: 33% of 384 MiB]
+Using 10 worker leases.
+Operational build model parameters: {cachingModelBuilding=false, configurationCache=false, configurationCacheDisabledReason=null, configurationCacheParallelLoad=false, configurationCacheParallelStore=false, configureOnDemand=false, invalidateCoupledProjects=false, isolatedProjects=false, modelAsProjectDependency=false, modelBuilding=false, parallelModelBuilding=false, parallelProjectConfiguration=false, parallelProjectExecution=false, resilientModelBuilding=false}
+Now considering [/Users/kimjuyoung/Desktop/Project/fbrl-backend] as hierarchies to watch
+Watching the file system is configured to be enabled if available
+File system watching is active
+Starting Build
+Settings evaluated using settings file '/Users/kimjuyoung/Desktop/Project/fbrl-backend/settings.gradle'.
+Projects loaded. Root project using build file '/Users/kimjuyoung/Desktop/Project/fbrl-backend/build.gradle'.
+Included projects: [root project 'fbrl-backend']
+
+> Configure project :
+Evaluating root project 'fbrl-backend' using build file '/Users/kimjuyoung/Desktop/Project/fbrl-backend/build.gradle'.
+Resolved plugin [id: 'java']
+Resolved plugin [id: 'org.springframework.boot', version: '4.0.7']
+Resolved plugin [id: 'io.spring.dependency-management', version: '1.1.7']
+Resolved plugin [id: 'com.diffplug.spotless', version: '6.25.0']
+Resolved plugin [id: 'jacoco']
+Applying dependency management to configuration 'annotationProcessor' in project 'fbrl-backend'
+Applying dependency management to configuration 'apiElements' in project 'fbrl-backend'
+Applying dependency management to configuration 'archives' in project 'fbrl-backend'
+Applying dependency management to configuration 'bootArchives' in project 'fbrl-backend'
+Applying dependency management to configuration 'compileClasspath' in project 'fbrl-backend'
+Applying dependency management to configuration 'compileOnly' in project 'fbrl-backend'
+Applying dependency management to configuration 'default' in project 'fbrl-backend'
+Applying dependency management to configuration 'developmentOnly' in project 'fbrl-backend'
+Applying dependency management to configuration 'implementation' in project 'fbrl-backend'
+Applying dependency management to configuration 'mainSourceElements' in project 'fbrl-backend'
+Applying dependency management to configuration 'productionRuntimeClasspath' in project 'fbrl-backend'
+Applying dependency management to configuration 'runtimeClasspath' in project 'fbrl-backend'
+Applying dependency management to configuration 'runtimeElements' in project 'fbrl-backend'
+Applying dependency management to configuration 'runtimeOnly' in project 'fbrl-backend'
+Applying dependency management to configuration 'testAndDevelopmentOnly' in project 'fbrl-backend'
+Applying dependency management to configuration 'testAnnotationProcessor' in project 'fbrl-backend'
+Applying dependency management to configuration 'testCompileClasspath' in project 'fbrl-backend'
+Applying dependency management to configuration 'testCompileOnly' in project 'fbrl-backend'
+Applying dependency management to configuration 'testImplementation' in project 'fbrl-backend'
+Applying dependency management to configuration 'testResultsElementsForTest' in project 'fbrl-backend'
+Applying dependency management to configuration 'testRuntimeClasspath' in project 'fbrl-backend'
+Applying dependency management to configuration 'testRuntimeOnly' in project 'fbrl-backend'
+Applying dependency management to configuration 'jacocoAgent' in project 'fbrl-backend'
+Applying dependency management to configuration 'jacocoAnt' in project 'fbrl-backend'
+Applying dependency management to configuration 'coverageDataElementsForTest' in project 'fbrl-backend'
+All projects evaluated.
+Task name matched 'test'
+Selected primary task 'test' from project :
+Starting process 'command '/usr/libexec/java_home''. Working directory: /Users/kimjuyoung/.gradle/daemon/9.5.1 Command: /usr/libexec/java_home -V
+Successfully started process 'command '/usr/libexec/java_home''
+Resolving global dependency management for project 'fbrl-backend'
+Excluding []
+Excluding []
+Excluding []
+Excluding []
+Excluding []
+Excluding []
+Excluding []
+Excluding []
+Tasks to be executed: [task ':compileJava', task ':processResources', task ':classes', task ':compileTestJava', task ':processTestResources', task ':testClasses', task ':test', task ':jacocoTestReport']
+Tasks that were excluded: []
+Resolve mutations for :compileJava (Thread[Execution worker,5,main]) started.
+:compileJava (Thread[Execution worker,5,main]) started.
+
+> Task :compileJava UP-TO-DATE
+Custom actions are attached to task ':compileJava'.
+Caching disabled for task ':compileJava' because:
+  Build cache is disabled
+Skipping task ':compileJava' as it is up-to-date.
+No compile result for :compileJava
+Resolve mutations for :processResources (Thread[Execution worker,5,main]) started.
+:processResources (Thread[Execution worker,5,main]) started.
+
+> Task :processResources UP-TO-DATE
+Caching disabled for task ':processResources' because:
+  Build cache is disabled
+  Not worth caching
+Skipping task ':processResources' as it is up-to-date.
+Resolve mutations for :classes (Thread[Execution worker,5,main]) started.
+:classes (Thread[Execution worker,5,main]) started.
+
+> Task :classes UP-TO-DATE
+Skipping task ':classes' as it has no actions.
+Resolve mutations for :compileTestJava (Thread[Execution worker,5,main]) started.
+:compileTestJava (Thread[Execution worker,5,main]) started.
+
+> Task :compileTestJava UP-TO-DATE
+Custom actions are attached to task ':compileTestJava'.
+Caching disabled for task ':compileTestJava' because:
+  Build cache is disabled
+Skipping task ':compileTestJava' as it is up-to-date.
+No compile result for :compileTestJava
+Resolve mutations for :processTestResources (Thread[Execution worker,5,main]) started.
+:processTestResources (Thread[Execution worker,5,main]) started.
+
+> Task :processTestResources NO-SOURCE
+Skipping task ':processTestResources' as it has no source files and no previous output files.
+Resolve mutations for :testClasses (Thread[Execution worker,5,main]) started.
+:testClasses (Thread[Execution worker,5,main]) started.
+
+> Task :testClasses UP-TO-DATE
+Skipping task ':testClasses' as it has no actions.
+Resolve mutations for :test (Thread[Execution worker,5,main]) started.
+:test (Thread[Execution worker,5,main]) started.
+Gradle Test Executor 21 started executing tests.
+
+> Task :test
+Custom actions are attached to task ':test'.
+Caching disabled for task ':test' because:
+  Build cache is disabled
+Task ':test' is not up-to-date because:
+  Task has failed previously.
+Starting process 'Gradle Test Executor 21'. Working directory: /Users/kimjuyoung/Desktop/Project/fbrl-backend Command: /opt/homebrew/Cellar/openjdk@17/17.0.18/libexec/openjdk.jdk/Contents/Home/bin/java -Dorg.gradle.internal.worker.tmpdir=/Users/kimjuyoung/Desktop/Project/fbrl-backend/build/tmp/test/work -javaagent:/Users/kimjuyoung/Desktop/Project/fbrl-backend/build/tmp/.cache/expanded/zip_cde35f471dab581134460fc9a50e2c59/jacocoagent.jar=destfile=build/jacoco/test.exec,append=true,inclnolocationclasses=false,dumponexit=true,output=file,jmx=false @/Users/kimjuyoung/.gradle/.tmp/gradle-worker-classpath16016736278949025586txt -Xmx512m -Dfile.encoding=UTF-8 -Duser.country=KR -Duser.language=ko -Duser.variant -ea worker.org.gradle.process.internal.worker.GradleWorkerMain 'Gradle Test Executor 21'
+Successfully started process 'Gradle Test Executor 21'
+
+락 3대장(Redisson 분산 락 vs 비관적 락 vs 낙관적 락) 성능 비교 테스트 STANDARD_OUT
+    15:58:20.835 [Test worker] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [com.fbrl.application.service.LockComparisonTest]: LockComparisonTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+    15:58:20.890 [Test worker] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration com.fbrl.FbrlBackendApplication for test class com.fbrl.application.service.LockComparisonTest
+    15:58:20.931 [Test worker] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [com.fbrl.application.service.LockComparisonTest]: LockComparisonTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+    15:58:20.932 [Test worker] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration com.fbrl.FbrlBackendApplication for test class com.fbrl.application.service.LockComparisonTest
+
+      .   ____          _            __ _ _
+     /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+    ( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+     \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+      '  |____| .__|_| |_|_| |_\__, | / / / /
+     =========|_|==============|___/=/_/_/_/
+
+     :: Spring Boot ::                (v4.0.7)
+
+    2026-07-30T15:58:21.126+09:00  INFO 46551 --- [fbrl-backend] [    Test worker] c.f.a.service.LockComparisonTest         : Starting LockComparisonTest using Java 17.0.18 with PID 46551 (started by kimjuyoung in /Users/kimjuyoung/Desktop/Project/fbrl-backend)
+    2026-07-30T15:58:21.127+09:00 DEBUG 46551 --- [fbrl-backend] [    Test worker] c.f.a.service.LockComparisonTest         : Running with Spring Boot v4.0.7, Spring v7.0.8
+    2026-07-30T15:58:21.127+09:00  INFO 46551 --- [fbrl-backend] [    Test worker] c.f.a.service.LockComparisonTest         : No active profile set, falling back to 1 default profile: "default"
+    2026-07-30T15:58:21.513+09:00  INFO 46551 --- [fbrl-backend] [    Test worker] .s.d.r.c.RepositoryConfigurationDelegate : Multiple Spring Data modules found, entering strict repository configuration mode
+    2026-07-30T15:58:21.514+09:00  INFO 46551 --- [fbrl-backend] [    Test worker] .s.d.r.c.RepositoryConfigurationDelegate : Bootstrapping Spring Data JPA repositories in DEFAULT mode.
+    2026-07-30T15:58:21.718+09:00  INFO 46551 --- [fbrl-backend] [    Test worker] .s.d.r.c.RepositoryConfigurationDelegate : Finished Spring Data repository scanning in 200 ms. Found 1 JPA repository interface.
+    2026-07-30T15:58:21.742+09:00  INFO 46551 --- [fbrl-backend] [    Test worker] .s.d.r.c.RepositoryConfigurationDelegate : Multiple Spring Data modules found, entering strict repository configuration mode
+    2026-07-30T15:58:21.743+09:00  INFO 46551 --- [fbrl-backend] [    Test worker] .s.d.r.c.RepositoryConfigurationDelegate : Bootstrapping Spring Data Redis repositories in DEFAULT mode.
+    2026-07-30T15:58:21.751+09:00  INFO 46551 --- [fbrl-backend] [    Test worker] .RepositoryConfigurationExtensionSupport : Spring Data Redis - Could not safely identify store assignment for repository candidate interface com.fbrl.adapter.out.persistence.AccountJpaRepository; If you want this repository to be a Redis repository, consider annotating your entities with one of these annotations: org.springframework.data.redis.core.RedisHash (preferred), or consider extending one of the following types with your repository: org.springframework.data.keyvalue.repository.KeyValueRepository
+    2026-07-30T15:58:21.751+09:00  INFO 46551 --- [fbrl-backend] [    Test worker] .s.d.r.c.RepositoryConfigurationDelegate : Finished Spring Data repository scanning in 3 ms. Found 0 Redis repository interfaces.
+    2026-07-30T15:58:22.080+09:00  INFO 46551 --- [fbrl-backend] [    Test worker] org.hibernate.orm.jpa                    : HHH008540: Processing PersistenceUnitInfo [name: default]
+    2026-07-30T15:58:22.107+09:00  INFO 46551 --- [fbrl-backend] [    Test worker] org.hibernate.orm.core                   : HHH000001: Hibernate ORM core version 7.2.19.Final
+    2026-07-30T15:58:22.310+09:00  INFO 46551 --- [fbrl-backend] [    Test worker] o.s.o.j.p.SpringPersistenceUnitInfo      : No LoadTimeWeaver setup: ignoring JPA class transformer
+    2026-07-30T15:58:22.327+09:00  INFO 46551 --- [fbrl-backend] [    Test worker] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...
+    2026-07-30T15:58:22.374+09:00  INFO 46551 --- [fbrl-backend] [    Test worker] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Added connection org.mariadb.jdbc.Connection@35653d6f
+    2026-07-30T15:58:22.375+09:00  INFO 46551 --- [fbrl-backend] [    Test worker] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Start completed.
+    2026-07-30T15:58:22.392+09:00  WARN 46551 --- [fbrl-backend] [    Test worker] org.hibernate.orm.deprecation            : HHH90000025: MariaDBDialect does not need to be specified explicitly using 'hibernate.dialect' (remove the property setting and it will be selected by default)
+    2026-07-30T15:58:22.400+09:00  INFO 46551 --- [fbrl-backend] [    Test worker] org.hibernate.orm.connections.pooling    : HHH10001005: Database info:
+    	Database JDBC URL [jdbc:mariadb://localhost/fbrl_db?user=fbrl_user&password=***&serverTimezone=Asia/Seoul&characterEncoding=UTF-8]
+    	Database driver: MariaDB Connector/J
+    	Database dialect: MariaDBDialect
+    	Database version: 11.2.6
+    	Default catalog/schema: fbrl_db/undefined
+    	Autocommit mode: undefined/unknown
+    	Isolation level: REPEATABLE_READ [default REPEATABLE_READ]
+    	JDBC fetch size: none
+    	Pool: DataSourceConnectionProvider
+    	Minimum pool size: undefined/unknown
+    	Maximum pool size: undefined/unknown
+    2026-07-30T15:58:22.798+09:00  INFO 46551 --- [fbrl-backend] [    Test worker] org.hibernate.orm.core                   : HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+    2026-07-30T15:58:22.824+09:00  INFO 46551 --- [fbrl-backend] [    Test worker] j.LocalContainerEntityManagerFactoryBean : Initialized JPA EntityManagerFactory for persistence unit 'default'
+    2026-07-30T15:58:22.867+09:00  INFO 46551 --- [fbrl-backend] [    Test worker] o.s.d.j.r.query.QueryEnhancerFactories   : Hibernate is in classpath; If applicable, HQL parser will be used.
+    2026-07-30T15:58:23.221+09:00  WARN 46551 --- [fbrl-backend] [    Test worker] i.n.r.d.DnsServerAddressStreamProviders  : Can not find io.netty.resolver.dns.macos.MacOSDnsServerAddressStreamProvider in the classpath, fallback to system defaults. This may result in incorrect DNS resolutions on MacOS. Check whether you have a dependency on 'io.netty:netty-resolver-dns-native-macos'
+    2026-07-30T15:58:23.376+09:00  INFO 46551 --- [fbrl-backend] [    Test worker] org.redisson.Version                     : Redisson 3.52.0
+    2026-07-30T15:58:23.471+09:00  INFO 46551 --- [fbrl-backend] [isson-netty-4-5] o.redisson.connection.ConnectionsHolder  : 1 connections initialized for localhost/127.0.0.1:6379
+    2026-07-30T15:58:23.495+09:00  INFO 46551 --- [fbrl-backend] [sson-netty-4-20] o.redisson.connection.ConnectionsHolder  : 24 connections initialized for localhost/127.0.0.1:6379
+    2026-07-30T15:58:23.550+09:00  WARN 46551 --- [fbrl-backend] [    Test worker] JpaBaseConfiguration$JpaWebConfiguration : spring.jpa.open-in-view is enabled by default. Therefore, database queries may be performed during view rendering. Explicitly configure spring.jpa.open-in-view to disable this warning
+    2026-07-30T15:58:23.829+09:00  INFO 46551 --- [fbrl-backend] [    Test worker] o.s.b.a.e.web.EndpointLinksResolver      : Exposing 1 endpoint beneath base path '/actuator'
+    2026-07-30T15:58:23.855+09:00  INFO 46551 --- [fbrl-backend] [    Test worker] c.f.a.service.LockComparisonTest         : Started LockComparisonTest in 2.896 seconds (process running for 3.566)
+
+Gradle Test Executor 21 finished executing tests.
+2026-07-30T15:58:24.274+09:00  INFO 46551 --- [fbrl-backend] [ionShutdownHook] j.LocalContainerEntityManagerFactoryBean : Closing JPA EntityManagerFactory for persistence unit 'default'
+2026-07-30T15:58:24.275+09:00  INFO 46551 --- [fbrl-backend] [ionShutdownHook] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Shutdown initiated...
+2026-07-30T15:58:24.277+09:00  INFO 46551 --- [fbrl-backend] [ionShutdownHook] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Shutdown completed.
+
+> Task :test FAILED
+
+락 3대장(Redisson 분산 락 vs 비관적 락 vs 낙관적 락) 성능 비교 테스트 > 3. JPA 낙관적 락(Optimistic Lock + Retry) 100개 동시 송금 성능 측정 STANDARD_OUT
+    2026-07-30T15:58:24.118+09:00 DEBUG 46551 --- [fbrl-backend] [    Test worker] org.hibernate.SQL                        : 
+        [34mselect[0m
+            ae1_0.id,
+            ae1_0.account_number,
+            ae1_0.balance,
+            ae1_0.version 
+        [34mfrom[0m
+            accounts ae1_0
+    [35m[Hibernate][0m 
+        [34mselect[0m
+            ae1_0.id,
+            ae1_0.account_number,
+            ae1_0.balance,
+            ae1_0.version 
+        [34mfrom[0m
+            accounts ae1_0
+    2026-07-30T15:58:24.147+09:00 DEBUG 46551 --- [fbrl-backend] [    Test worker] org.hibernate.SQL                        : 
+        [34minsert[0m 
+        [34minto[0m
+            accounts
+            (account_number, balance, version) 
+        [34mvalues[0m
+            (?, ?, ?)
+    [35m[Hibernate][0m 
+        [34minsert[0m 
+        [34minto[0m
+            accounts
+            (account_number, balance, version) 
+        [34mvalues[0m
+            (?, ?, ?)
+    2026-07-30T15:58:24.150+09:00  WARN 46551 --- [fbrl-backend] [    Test worker] o.m.jdbc.message.server.ErrorPacket      : Error: 1062-23000: Duplicate entry '111-111' for key 'UK6kplolsdtr3slnvx97xsy2kc8'
+    2026-07-30T15:58:24.151+09:00  WARN 46551 --- [fbrl-backend] [    Test worker] org.hibernate.orm.jdbc.error             : HHH000247: ErrorCode: 1062, SQLState: 23000
+    2026-07-30T15:58:24.151+09:00  WARN 46551 --- [fbrl-backend] [    Test worker] org.hibernate.orm.jdbc.error             : (conn=89) Duplicate entry '111-111' for key 'UK6kplolsdtr3slnvx97xsy2kc8'
+
+락 3대장(Redisson 분산 락 vs 비관적 락 vs 낙관적 락) 성능 비교 테스트 > 3. JPA 낙관적 락(Optimistic Lock + Retry) 100개 동시 송금 성능 측정 FAILED
+    org.springframework.dao.DataIntegrityViolationException: could not execute statement [(conn=89) Duplicate entry '111-111' for key 'UK6kplolsdtr3slnvx97xsy2kc8'] [insert into accounts (account_number,balance,version) values (?,?,?)]; SQL [insert into accounts (account_number,balance,version) values (?,?,?)]; constraint [UK6kplolsdtr3slnvx97xsy2kc8]
+        at app//org.springframework.orm.jpa.hibernate.HibernateExceptionTranslator.convertHibernateAccessException(HibernateExceptionTranslator.java:169)
+        at app//org.springframework.orm.jpa.hibernate.HibernateExceptionTranslator.convertHibernateAccessException(HibernateExceptionTranslator.java:131)
+        at app//org.springframework.orm.jpa.hibernate.HibernateExceptionTranslator.translateExceptionIfPossible(HibernateExceptionTranslator.java:105)
+        at app//org.springframework.orm.jpa.vendor.HibernateJpaDialect.translateExceptionIfPossible(HibernateJpaDialect.java:223)
+        at app//org.springframework.orm.jpa.AbstractEntityManagerFactoryBean.translateExceptionIfPossible(AbstractEntityManagerFactoryBean.java:577)
+        at app//org.springframework.dao.support.ChainedPersistenceExceptionTranslator.translateExceptionIfPossible(ChainedPersistenceExceptionTranslator.java:61)
+        at app//org.springframework.dao.support.DataAccessUtils.translateIfNecessary(DataAccessUtils.java:346)
+        at app//org.springframework.dao.support.PersistenceExceptionTranslationInterceptor.invoke(PersistenceExceptionTranslationInterceptor.java:157)
+        at app//org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:179)
+        at app//org.springframework.data.jpa.repository.support.CrudMethodMetadataPostProcessor$CrudMethodMetadataPopulatingMethodInterceptor.invoke(CrudMethodMetadataPostProcessor.java:166)
+        at app//org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:179)
+        at app//org.springframework.aop.framework.JdkDynamicAopProxy.invoke(JdkDynamicAopProxy.java:222)
+        at app/jdk.proxy3/jdk.proxy3.$Proxy180.save(Unknown Source)
+        at app//com.fbrl.adapter.out.persistence.AccountPersistenceAdapter.save(AccountPersistenceAdapter.java:28)
+        at app//com.fbrl.application.service.LockComparisonTest.setUp(LockComparisonTest.java:37)
+
+        Caused by:
+        org.hibernate.exception.ConstraintViolationException: could not execute statement [(conn=89) Duplicate entry '111-111' for key 'UK6kplolsdtr3slnvx97xsy2kc8'] [insert into accounts (account_number,balance,version) values (?,?,?)]
+            at app//org.hibernate.dialect.MariaDBDialect.lambda$buildSQLExceptionConversionDelegate$0(MariaDBDialect.java:371)
+            at app//org.hibernate.exception.internal.StandardSQLExceptionConverter.convert(StandardSQLExceptionConverter.java:34)
+            at app//org.hibernate.engine.jdbc.spi.SqlExceptionHelper.convert(SqlExceptionHelper.java:115)
+            at app//org.hibernate.engine.jdbc.internal.ResultSetReturnImpl.executeUpdate(ResultSetReturnImpl.java:184)
+            at app//org.hibernate.id.insert.GetGeneratedKeysDelegate.performMutation(GetGeneratedKeysDelegate.java:103)
+            at app//org.hibernate.engine.jdbc.mutation.internal.MutationExecutorSingleNonBatched.performNonBatchedOperations(MutationExecutorSingleNonBatched.java:45)
+            at app//org.hibernate.engine.jdbc.mutation.internal.AbstractMutationExecutor.execute(AbstractMutationExecutor.java:66)
+            at app//org.hibernate.engine.jdbc.mutation.internal.AbstractMutationExecutor.execute(AbstractMutationExecutor.java:55)
+            at app//org.hibernate.persister.entity.mutation.InsertCoordinatorStandard.doStaticInserts(InsertCoordinatorStandard.java:180)
+            at app//org.hibernate.persister.entity.mutation.InsertCoordinatorStandard.coordinateInsert(InsertCoordinatorStandard.java:120)
+            at app//org.hibernate.persister.entity.mutation.InsertCoordinatorStandard.insert(InsertCoordinatorStandard.java:84)
+            at app//org.hibernate.action.internal.EntityIdentityInsertAction.execute(EntityIdentityInsertAction.java:85)
+            at app//org.hibernate.engine.spi.ActionQueue.execute(ActionQueue.java:667)
+            at app//org.hibernate.engine.spi.ActionQueue.addResolvedEntityInsertAction(ActionQueue.java:291)
+            at app//org.hibernate.engine.spi.ActionQueue.addInsertAction(ActionQueue.java:270)
+            at app//org.hibernate.engine.spi.ActionQueue.addAction(ActionQueue.java:322)
+            at app//org.hibernate.event.internal.AbstractSaveEventListener.addInsertAction(AbstractSaveEventListener.java:371)
+            at app//org.hibernate.event.internal.AbstractSaveEventListener.performSaveOrReplicate(AbstractSaveEventListener.java:285)
+            at app//org.hibernate.event.internal.AbstractSaveEventListener.performSave(AbstractSaveEventListener.java:215)
+            at app//org.hibernate.event.internal.AbstractSaveEventListener.saveWithGeneratedId(AbstractSaveEventListener.java:133)
+            at app//org.hibernate.event.internal.DefaultPersistEventListener.entityIsTransient(DefaultPersistEventListener.java:144)
+            at app//org.hibernate.event.internal.DefaultPersistEventListener.persist(DefaultPersistEventListener.java:90)
+            at app//org.hibernate.event.internal.DefaultPersistEventListener.onPersist(DefaultPersistEventListener.java:74)
+            at app//org.hibernate.event.internal.DefaultPersistEventListener.onPersist(DefaultPersistEventListener.java:50)
+            at app//org.hibernate.event.service.internal.EventListenerGroupImpl.fireEventOnEachListener(EventListenerGroupImpl.java:138)
+            at app//org.hibernate.internal.SessionImpl.firePersist(SessionImpl.java:692)
+            at app//org.hibernate.internal.SessionImpl.persist(SessionImpl.java:675)
+            at java.base@17.0.18/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+            at java.base@17.0.18/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+            at java.base@17.0.18/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+            at java.base@17.0.18/java.lang.reflect.Method.invoke(Method.java:569)
+            at app//org.springframework.orm.jpa.SharedEntityManagerCreator$SharedEntityHandlerInvocationHandler.invokeMethod(SharedEntityManagerCreator.java:239)
+            at app//org.springframework.orm.jpa.SharedEntityManagerCreator$SharedEntityManagerInvocationHandler.invoke(SharedEntityManagerCreator.java:383)
+            at app/jdk.proxy3/jdk.proxy3.$Proxy169.persist(Unknown Source)
+            at app//org.springframework.data.jpa.repository.support.SimpleJpaRepository.save(SimpleJpaRepository.java:664)
+            at java.base@17.0.18/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+            at java.base@17.0.18/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+            at java.base@17.0.18/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+            at java.base@17.0.18/java.lang.reflect.Method.invoke(Method.java:569)
+            at app//org.springframework.aop.support.AopUtils.invokeJoinpointUsingReflection(AopUtils.java:359)
+            at app//org.springframework.data.repository.core.support.RepositoryMethodInvoker$RepositoryFragmentMethodInvoker.lambda$new$0(RepositoryMethodInvoker.java:278)
+            at app//org.springframework.data.repository.core.support.RepositoryMethodInvoker.doInvoke(RepositoryMethodInvoker.java:169)
+            at app//org.springframework.data.repository.core.support.RepositoryMethodInvoker.invoke(RepositoryMethodInvoker.java:158)
+            at app//org.springframework.data.repository.core.support.RepositoryComposition$RepositoryFragments.invoke(RepositoryComposition.java:545)
+            at app//org.springframework.data.repository.core.support.RepositoryComposition.invoke(RepositoryComposition.java:290)
+            at app//org.springframework.data.repository.core.support.RepositoryFactorySupport$ImplementationMethodExecutionInterceptor.invoke(RepositoryFactorySupport.java:690)
+            at app//org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:179)
+            at app//org.springframework.data.repository.core.support.QueryExecutorMethodInterceptor.doInvoke(QueryExecutorMethodInterceptor.java:171)
+            at app//org.springframework.data.repository.core.support.QueryExecutorMethodInterceptor.invoke(QueryExecutorMethodInterceptor.java:146)
+            at app//org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:179)
+            at app//org.springframework.data.projection.DefaultMethodInvokingMethodInterceptor.invoke(DefaultMethodInvokingMethodInterceptor.java:69)
+            at app//org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:179)
+            at app//org.springframework.transaction.interceptor.TransactionInterceptor$1.proceedWithInvocation(TransactionInterceptor.java:133)
+            at app//org.springframework.transaction.interceptor.TransactionAspectSupport.invokeWithinTransaction(TransactionAspectSupport.java:371)
+            at app//org.springframework.transaction.interceptor.TransactionInterceptor.invoke(TransactionInterceptor.java:130)
+            at app//org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:179)
+            at app//org.springframework.dao.support.PersistenceExceptionTranslationInterceptor.invoke(PersistenceExceptionTranslationInterceptor.java:135)
+            ... 7 more
+
+            Caused by:
+            java.sql.SQLIntegrityConstraintViolationException: (conn=89) Duplicate entry '111-111' for key 'UK6kplolsdtr3slnvx97xsy2kc8'
+                at org.mariadb.jdbc.export.ExceptionFactory.createException(ExceptionFactory.java:317)
+                at org.mariadb.jdbc.export.ExceptionFactory.create(ExceptionFactory.java:402)
+                at org.mariadb.jdbc.message.ClientMessage.readPacket(ClientMessage.java:195)
+                at org.mariadb.jdbc.client.impl.StandardClient.readPacket(StandardClient.java:1414)
+                at org.mariadb.jdbc.client.impl.StandardClient.readResults(StandardClient.java:1353)
+                at org.mariadb.jdbc.client.impl.StandardClient.readResponse(StandardClient.java:1272)
+                at org.mariadb.jdbc.client.impl.StandardClient.execute(StandardClient.java:1196)
+                at org.mariadb.jdbc.ClientPreparedStatement.executeInternal(ClientPreparedStatement.java:91)
+                at org.mariadb.jdbc.ClientPreparedStatement.executeLargeUpdate(ClientPreparedStatement.java:345)
+                at org.mariadb.jdbc.ClientPreparedStatement.executeUpdate(ClientPreparedStatement.java:322)
+                at com.zaxxer.hikari.pool.ProxyPreparedStatement.executeUpdate(ProxyPreparedStatement.java:61)
+                at com.zaxxer.hikari.pool.HikariProxyPreparedStatement.executeUpdate(HikariProxyPreparedStatement.java)
+                at org.hibernate.engine.jdbc.internal.ResultSetReturnImpl.executeUpdate(ResultSetReturnImpl.java:181)
+                ... 60 more
+
+락 3대장(Redisson 분산 락 vs 비관적 락 vs 낙관적 락) 성능 비교 테스트 > 1. Redisson 분산 락 100개 동시 송금 성능 측정 STANDARD_OUT
+    2026-07-30T15:58:24.162+09:00 DEBUG 46551 --- [fbrl-backend] [    Test worker] org.hibernate.SQL                        : 
+        [34mselect[0m
+            ae1_0.id,
+            ae1_0.account_number,
+            ae1_0.balance,
+            ae1_0.version 
+        [34mfrom[0m
+            accounts ae1_0
+    [35m[Hibernate][0m 
+        [34mselect[0m
+            ae1_0.id,
+            ae1_0.account_number,
+            ae1_0.balance,
+            ae1_0.version 
+        [34mfrom[0m
+            accounts ae1_0
+    2026-07-30T15:58:24.165+09:00 DEBUG 46551 --- [fbrl-backend] [    Test worker] org.hibernate.SQL                        : 
+        [34minsert[0m 
+        [34minto[0m
+            accounts
+            (account_number, balance, version) 
+        [34mvalues[0m
+            (?, ?, ?)
+    [35m[Hibernate][0m 
+        [34minsert[0m 
+        [34minto[0m
+            accounts
+            (account_number, balance, version) 
+        [34mvalues[0m
+            (?, ?, ?)
+    2026-07-30T15:58:24.166+09:00  WARN 46551 --- [fbrl-backend] [    Test worker] o.m.jdbc.message.server.ErrorPacket      : Error: 1062-23000: Duplicate entry '111-111' for key 'UK6kplolsdtr3slnvx97xsy2kc8'
+    2026-07-30T15:58:24.166+09:00  WARN 46551 --- [fbrl-backend] [    Test worker] org.hibernate.orm.jdbc.error             : HHH000247: ErrorCode: 1062, SQLState: 23000
+    2026-07-30T15:58:24.166+09:00  WARN 46551 --- [fbrl-backend] [    Test worker] org.hibernate.orm.jdbc.error             : (conn=89) Duplicate entry '111-111' for key 'UK6kplolsdtr3slnvx97xsy2kc8'
+
+락 3대장(Redisson 분산 락 vs 비관적 락 vs 낙관적 락) 성능 비교 테스트 > 1. Redisson 분산 락 100개 동시 송금 성능 측정 FAILED
+    org.springframework.dao.DataIntegrityViolationException: could not execute statement [(conn=89) Duplicate entry '111-111' for key 'UK6kplolsdtr3slnvx97xsy2kc8'] [insert into accounts (account_number,balance,version) values (?,?,?)]; SQL [insert into accounts (account_number,balance,version) values (?,?,?)]; constraint [UK6kplolsdtr3slnvx97xsy2kc8]
+        at app//org.springframework.orm.jpa.hibernate.HibernateExceptionTranslator.convertHibernateAccessException(HibernateExceptionTranslator.java:169)
+        at app//org.springframework.orm.jpa.hibernate.HibernateExceptionTranslator.convertHibernateAccessException(HibernateExceptionTranslator.java:131)
+        at app//org.springframework.orm.jpa.hibernate.HibernateExceptionTranslator.translateExceptionIfPossible(HibernateExceptionTranslator.java:105)
+        at app//org.springframework.orm.jpa.vendor.HibernateJpaDialect.translateExceptionIfPossible(HibernateJpaDialect.java:223)
+        at app//org.springframework.orm.jpa.AbstractEntityManagerFactoryBean.translateExceptionIfPossible(AbstractEntityManagerFactoryBean.java:577)
+        at app//org.springframework.dao.support.ChainedPersistenceExceptionTranslator.translateExceptionIfPossible(ChainedPersistenceExceptionTranslator.java:61)
+        at app//org.springframework.dao.support.DataAccessUtils.translateIfNecessary(DataAccessUtils.java:346)
+        at app//org.springframework.dao.support.PersistenceExceptionTranslationInterceptor.invoke(PersistenceExceptionTranslationInterceptor.java:157)
+        at app//org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:179)
+        at app//org.springframework.data.jpa.repository.support.CrudMethodMetadataPostProcessor$CrudMethodMetadataPopulatingMethodInterceptor.invoke(CrudMethodMetadataPostProcessor.java:166)
+        at app//org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:179)
+        at app//org.springframework.aop.framework.JdkDynamicAopProxy.invoke(JdkDynamicAopProxy.java:222)
+        at app/jdk.proxy3/jdk.proxy3.$Proxy180.save(Unknown Source)
+        at app//com.fbrl.adapter.out.persistence.AccountPersistenceAdapter.save(AccountPersistenceAdapter.java:28)
+        at app//com.fbrl.application.service.LockComparisonTest.setUp(LockComparisonTest.java:37)
+
+        Caused by:
+        org.hibernate.exception.ConstraintViolationException: could not execute statement [(conn=89) Duplicate entry '111-111' for key 'UK6kplolsdtr3slnvx97xsy2kc8'] [insert into accounts (account_number,balance,version) values (?,?,?)]
+            at app//org.hibernate.dialect.MariaDBDialect.lambda$buildSQLExceptionConversionDelegate$0(MariaDBDialect.java:371)
+            at app//org.hibernate.exception.internal.StandardSQLExceptionConverter.convert(StandardSQLExceptionConverter.java:34)
+            at app//org.hibernate.engine.jdbc.spi.SqlExceptionHelper.convert(SqlExceptionHelper.java:115)
+            at app//org.hibernate.engine.jdbc.internal.ResultSetReturnImpl.executeUpdate(ResultSetReturnImpl.java:184)
+            at app//org.hibernate.id.insert.GetGeneratedKeysDelegate.performMutation(GetGeneratedKeysDelegate.java:103)
+            at app//org.hibernate.engine.jdbc.mutation.internal.MutationExecutorSingleNonBatched.performNonBatchedOperations(MutationExecutorSingleNonBatched.java:45)
+            at app//org.hibernate.engine.jdbc.mutation.internal.AbstractMutationExecutor.execute(AbstractMutationExecutor.java:66)
+            at app//org.hibernate.engine.jdbc.mutation.internal.AbstractMutationExecutor.execute(AbstractMutationExecutor.java:55)
+            at app//org.hibernate.persister.entity.mutation.InsertCoordinatorStandard.doStaticInserts(InsertCoordinatorStandard.java:180)
+            at app//org.hibernate.persister.entity.mutation.InsertCoordinatorStandard.coordinateInsert(InsertCoordinatorStandard.java:120)
+            at app//org.hibernate.persister.entity.mutation.InsertCoordinatorStandard.insert(InsertCoordinatorStandard.java:84)
+            at app//org.hibernate.action.internal.EntityIdentityInsertAction.execute(EntityIdentityInsertAction.java:85)
+            at app//org.hibernate.engine.spi.ActionQueue.execute(ActionQueue.java:667)
+            at app//org.hibernate.engine.spi.ActionQueue.addResolvedEntityInsertAction(ActionQueue.java:291)
+            at app//org.hibernate.engine.spi.ActionQueue.addInsertAction(ActionQueue.java:270)
+            at app//org.hibernate.engine.spi.ActionQueue.addAction(ActionQueue.java:322)
+            at app//org.hibernate.event.internal.AbstractSaveEventListener.addInsertAction(AbstractSaveEventListener.java:371)
+            at app//org.hibernate.event.internal.AbstractSaveEventListener.performSaveOrReplicate(AbstractSaveEventListener.java:285)
+            at app//org.hibernate.event.internal.AbstractSaveEventListener.performSave(AbstractSaveEventListener.java:215)
+            at app//org.hibernate.event.internal.AbstractSaveEventListener.saveWithGeneratedId(AbstractSaveEventListener.java:133)
+            at app//org.hibernate.event.internal.DefaultPersistEventListener.entityIsTransient(DefaultPersistEventListener.java:144)
+            at app//org.hibernate.event.internal.DefaultPersistEventListener.persist(DefaultPersistEventListener.java:90)
+            at app//org.hibernate.event.internal.DefaultPersistEventListener.onPersist(DefaultPersistEventListener.java:74)
+            at app//org.hibernate.event.internal.DefaultPersistEventListener.onPersist(DefaultPersistEventListener.java:50)
+            at app//org.hibernate.event.service.internal.EventListenerGroupImpl.fireEventOnEachListener(EventListenerGroupImpl.java:138)
+            at app//org.hibernate.internal.SessionImpl.firePersist(SessionImpl.java:692)
+            at app//org.hibernate.internal.SessionImpl.persist(SessionImpl.java:675)
+            at java.base@17.0.18/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+            at java.base@17.0.18/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+            at java.base@17.0.18/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+            at java.base@17.0.18/java.lang.reflect.Method.invoke(Method.java:569)
+            at app//org.springframework.orm.jpa.SharedEntityManagerCreator$SharedEntityHandlerInvocationHandler.invokeMethod(SharedEntityManagerCreator.java:239)
+            at app//org.springframework.orm.jpa.SharedEntityManagerCreator$SharedEntityManagerInvocationHandler.invoke(SharedEntityManagerCreator.java:383)
+            at app/jdk.proxy3/jdk.proxy3.$Proxy169.persist(Unknown Source)
+            at app//org.springframework.data.jpa.repository.support.SimpleJpaRepository.save(SimpleJpaRepository.java:664)
+            at java.base@17.0.18/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+            at java.base@17.0.18/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+            at java.base@17.0.18/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+            at java.base@17.0.18/java.lang.reflect.Method.invoke(Method.java:569)
+            at app//org.springframework.aop.support.AopUtils.invokeJoinpointUsingReflection(AopUtils.java:359)
+            at app//org.springframework.data.repository.core.support.RepositoryMethodInvoker$RepositoryFragmentMethodInvoker.lambda$new$0(RepositoryMethodInvoker.java:278)
+            at app//org.springframework.data.repository.core.support.RepositoryMethodInvoker.doInvoke(RepositoryMethodInvoker.java:169)
+            at app//org.springframework.data.repository.core.support.RepositoryMethodInvoker.invoke(RepositoryMethodInvoker.java:158)
+            at app//org.springframework.data.repository.core.support.RepositoryComposition$RepositoryFragments.invoke(RepositoryComposition.java:545)
+            at app//org.springframework.data.repository.core.support.RepositoryComposition.invoke(RepositoryComposition.java:290)
+            at app//org.springframework.data.repository.core.support.RepositoryFactorySupport$ImplementationMethodExecutionInterceptor.invoke(RepositoryFactorySupport.java:690)
+            at app//org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:179)
+            at app//org.springframework.data.repository.core.support.QueryExecutorMethodInterceptor.doInvoke(QueryExecutorMethodInterceptor.java:171)
+            at app//org.springframework.data.repository.core.support.QueryExecutorMethodInterceptor.invoke(QueryExecutorMethodInterceptor.java:146)
+            at app//org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:179)
+            at app//org.springframework.data.projection.DefaultMethodInvokingMethodInterceptor.invoke(DefaultMethodInvokingMethodInterceptor.java:69)
+            at app//org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:179)
+            at app//org.springframework.transaction.interceptor.TransactionInterceptor$1.proceedWithInvocation(TransactionInterceptor.java:133)
+            at app//org.springframework.transaction.interceptor.TransactionAspectSupport.invokeWithinTransaction(TransactionAspectSupport.java:371)
+            at app//org.springframework.transaction.interceptor.TransactionInterceptor.invoke(TransactionInterceptor.java:130)
+            at app//org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:179)
+            at app//org.springframework.dao.support.PersistenceExceptionTranslationInterceptor.invoke(PersistenceExceptionTranslationInterceptor.java:135)
+            ... 7 more
+
+            Caused by:
+            java.sql.SQLIntegrityConstraintViolationException: (conn=89) Duplicate entry '111-111' for key 'UK6kplolsdtr3slnvx97xsy2kc8'
+                at org.mariadb.jdbc.export.ExceptionFactory.createException(ExceptionFactory.java:317)
+                at org.mariadb.jdbc.export.ExceptionFactory.create(ExceptionFactory.java:402)
+                at org.mariadb.jdbc.message.ClientMessage.readPacket(ClientMessage.java:195)
+                at org.mariadb.jdbc.client.impl.StandardClient.readPacket(StandardClient.java:1414)
+                at org.mariadb.jdbc.client.impl.StandardClient.readResults(StandardClient.java:1353)
+                at org.mariadb.jdbc.client.impl.StandardClient.readResponse(StandardClient.java:1272)
+                at org.mariadb.jdbc.client.impl.StandardClient.execute(StandardClient.java:1196)
+                at org.mariadb.jdbc.ClientPreparedStatement.executeInternal(ClientPreparedStatement.java:91)
+                at org.mariadb.jdbc.ClientPreparedStatement.executeLargeUpdate(ClientPreparedStatement.java:345)
+                at org.mariadb.jdbc.ClientPreparedStatement.executeUpdate(ClientPreparedStatement.java:322)
+                at com.zaxxer.hikari.pool.ProxyPreparedStatement.executeUpdate(ProxyPreparedStatement.java:61)
+                at com.zaxxer.hikari.pool.HikariProxyPreparedStatement.executeUpdate(HikariProxyPreparedStatement.java)
+                at org.hibernate.engine.jdbc.internal.ResultSetReturnImpl.executeUpdate(ResultSetReturnImpl.java:181)
+                ... 60 more
+
+락 3대장(Redisson 분산 락 vs 비관적 락 vs 낙관적 락) 성능 비교 테스트 > 2. JPA 비관적 락(Pessimistic Lock) 100개 동시 송금 성능 측정 STANDARD_OUT
+    2026-07-30T15:58:24.170+09:00 DEBUG 46551 --- [fbrl-backend] [    Test worker] org.hibernate.SQL                        : 
+        [34mselect[0m
+            ae1_0.id,
+            ae1_0.account_number,
+            ae1_0.balance,
+            ae1_0.version 
+        [34mfrom[0m
+            accounts ae1_0
+    [35m[Hibernate][0m 
+        [34mselect[0m
+            ae1_0.id,
+            ae1_0.account_number,
+            ae1_0.balance,
+            ae1_0.version 
+        [34mfrom[0m
+            accounts ae1_0
+    2026-07-30T15:58:24.172+09:00 DEBUG 46551 --- [fbrl-backend] [    Test worker] org.hibernate.SQL                        : 
+        [34minsert[0m 
+        [34minto[0m
+            accounts
+            (account_number, balance, version) 
+        [34mvalues[0m
+            (?, ?, ?)
+    [35m[Hibernate][0m 
+        [34minsert[0m 
+        [34minto[0m
+            accounts
+            (account_number, balance, version) 
+        [34mvalues[0m
+            (?, ?, ?)
+    2026-07-30T15:58:24.172+09:00  WARN 46551 --- [fbrl-backend] [    Test worker] o.m.jdbc.message.server.ErrorPacket      : Error: 1062-23000: Duplicate entry '111-111' for key 'UK6kplolsdtr3slnvx97xsy2kc8'
+    2026-07-30T15:58:24.172+09:00  WARN 46551 --- [fbrl-backend] [    Test worker] org.hibernate.orm.jdbc.error             : HHH000247: ErrorCode: 1062, SQLState: 23000
+    2026-07-30T15:58:24.172+09:00  WARN 46551 --- [fbrl-backend] [    Test worker] org.hibernate.orm.jdbc.error             : (conn=89) Duplicate entry '111-111' for key 'UK6kplolsdtr3slnvx97xsy2kc8'
+
+락 3대장(Redisson 분산 락 vs 비관적 락 vs 낙관적 락) 성능 비교 테스트 > 2. JPA 비관적 락(Pessimistic Lock) 100개 동시 송금 성능 측정 FAILED
+    org.springframework.dao.DataIntegrityViolationException: could not execute statement [(conn=89) Duplicate entry '111-111' for key 'UK6kplolsdtr3slnvx97xsy2kc8'] [insert into accounts (account_number,balance,version) values (?,?,?)]; SQL [insert into accounts (account_number,balance,version) values (?,?,?)]; constraint [UK6kplolsdtr3slnvx97xsy2kc8]
+        at app//org.springframework.orm.jpa.hibernate.HibernateExceptionTranslator.convertHibernateAccessException(HibernateExceptionTranslator.java:169)
+        at app//org.springframework.orm.jpa.hibernate.HibernateExceptionTranslator.convertHibernateAccessException(HibernateExceptionTranslator.java:131)
+        at app//org.springframework.orm.jpa.hibernate.HibernateExceptionTranslator.translateExceptionIfPossible(HibernateExceptionTranslator.java:105)
+        at app//org.springframework.orm.jpa.vendor.HibernateJpaDialect.translateExceptionIfPossible(HibernateJpaDialect.java:223)
+        at app//org.springframework.orm.jpa.AbstractEntityManagerFactoryBean.translateExceptionIfPossible(AbstractEntityManagerFactoryBean.java:577)
+        at app//org.springframework.dao.support.ChainedPersistenceExceptionTranslator.translateExceptionIfPossible(ChainedPersistenceExceptionTranslator.java:61)
+        at app//org.springframework.dao.support.DataAccessUtils.translateIfNecessary(DataAccessUtils.java:346)
+        at app//org.springframework.dao.support.PersistenceExceptionTranslationInterceptor.invoke(PersistenceExceptionTranslationInterceptor.java:157)
+        at app//org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:179)
+        at app//org.springframework.data.jpa.repository.support.CrudMethodMetadataPostProcessor$CrudMethodMetadataPopulatingMethodInterceptor.invoke(CrudMethodMetadataPostProcessor.java:166)
+        at app//org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:179)
+        at app//org.springframework.aop.framework.JdkDynamicAopProxy.invoke(JdkDynamicAopProxy.java:222)
+        at app/jdk.proxy3/jdk.proxy3.$Proxy180.save(Unknown Source)
+        at app//com.fbrl.adapter.out.persistence.AccountPersistenceAdapter.save(AccountPersistenceAdapter.java:28)
+        at app//com.fbrl.application.service.LockComparisonTest.setUp(LockComparisonTest.java:37)
+
+        Caused by:
+        org.hibernate.exception.ConstraintViolationException: could not execute statement [(conn=89) Duplicate entry '111-111' for key 'UK6kplolsdtr3slnvx97xsy2kc8'] [insert into accounts (account_number,balance,version) values (?,?,?)]
+            at app//org.hibernate.dialect.MariaDBDialect.lambda$buildSQLExceptionConversionDelegate$0(MariaDBDialect.java:371)
+            at app//org.hibernate.exception.internal.StandardSQLExceptionConverter.convert(StandardSQLExceptionConverter.java:34)
+            at app//org.hibernate.engine.jdbc.spi.SqlExceptionHelper.convert(SqlExceptionHelper.java:115)
+            at app//org.hibernate.engine.jdbc.internal.ResultSetReturnImpl.executeUpdate(ResultSetReturnImpl.java:184)
+            at app//org.hibernate.id.insert.GetGeneratedKeysDelegate.performMutation(GetGeneratedKeysDelegate.java:103)
+            at app//org.hibernate.engine.jdbc.mutation.internal.MutationExecutorSingleNonBatched.performNonBatchedOperations(MutationExecutorSingleNonBatched.java:45)
+            at app//org.hibernate.engine.jdbc.mutation.internal.AbstractMutationExecutor.execute(AbstractMutationExecutor.java:66)
+            at app//org.hibernate.engine.jdbc.mutation.internal.AbstractMutationExecutor.execute(AbstractMutationExecutor.java:55)
+            at app//org.hibernate.persister.entity.mutation.InsertCoordinatorStandard.doStaticInserts(InsertCoordinatorStandard.java:180)
+            at app//org.hibernate.persister.entity.mutation.InsertCoordinatorStandard.coordinateInsert(InsertCoordinatorStandard.java:120)
+            at app//org.hibernate.persister.entity.mutation.InsertCoordinatorStandard.insert(InsertCoordinatorStandard.java:84)
+            at app//org.hibernate.action.internal.EntityIdentityInsertAction.execute(EntityIdentityInsertAction.java:85)
+            at app//org.hibernate.engine.spi.ActionQueue.execute(ActionQueue.java:667)
+            at app//org.hibernate.engine.spi.ActionQueue.addResolvedEntityInsertAction(ActionQueue.java:291)
+            at app//org.hibernate.engine.spi.ActionQueue.addInsertAction(ActionQueue.java:270)
+            at app//org.hibernate.engine.spi.ActionQueue.addAction(ActionQueue.java:322)
+            at app//org.hibernate.event.internal.AbstractSaveEventListener.addInsertAction(AbstractSaveEventListener.java:371)
+            at app//org.hibernate.event.internal.AbstractSaveEventListener.performSaveOrReplicate(AbstractSaveEventListener.java:285)
+            at app//org.hibernate.event.internal.AbstractSaveEventListener.performSave(AbstractSaveEventListener.java:215)
+            at app//org.hibernate.event.internal.AbstractSaveEventListener.saveWithGeneratedId(AbstractSaveEventListener.java:133)
+            at app//org.hibernate.event.internal.DefaultPersistEventListener.entityIsTransient(DefaultPersistEventListener.java:144)
+            at app//org.hibernate.event.internal.DefaultPersistEventListener.persist(DefaultPersistEventListener.java:90)
+            at app//org.hibernate.event.internal.DefaultPersistEventListener.onPersist(DefaultPersistEventListener.java:74)
+            at app//org.hibernate.event.internal.DefaultPersistEventListener.onPersist(DefaultPersistEventListener.java:50)
+            at app//org.hibernate.event.service.internal.EventListenerGroupImpl.fireEventOnEachListener(EventListenerGroupImpl.java:138)
+            at app//org.hibernate.internal.SessionImpl.firePersist(SessionImpl.java:692)
+            at app//org.hibernate.internal.SessionImpl.persist(SessionImpl.java:675)
+            at java.base@17.0.18/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+            at java.base@17.0.18/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+            at java.base@17.0.18/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+            at java.base@17.0.18/java.lang.reflect.Method.invoke(Method.java:569)
+            at app//org.springframework.orm.jpa.SharedEntityManagerCreator$SharedEntityHandlerInvocationHandler.invokeMethod(SharedEntityManagerCreator.java:239)
+            at app//org.springframework.orm.jpa.SharedEntityManagerCreator$SharedEntityManagerInvocationHandler.invoke(SharedEntityManagerCreator.java:383)
+            at app/jdk.proxy3/jdk.proxy3.$Proxy169.persist(Unknown Source)
+            at app//org.springframework.data.jpa.repository.support.SimpleJpaRepository.save(SimpleJpaRepository.java:664)
+            at java.base@17.0.18/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+            at java.base@17.0.18/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+            at java.base@17.0.18/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+            at java.base@17.0.18/java.lang.reflect.Method.invoke(Method.java:569)
+            at app//org.springframework.aop.support.AopUtils.invokeJoinpointUsingReflection(AopUtils.java:359)
+            at app//org.springframework.data.repository.core.support.RepositoryMethodInvoker$RepositoryFragmentMethodInvoker.lambda$new$0(RepositoryMethodInvoker.java:278)
+            at app//org.springframework.data.repository.core.support.RepositoryMethodInvoker.doInvoke(RepositoryMethodInvoker.java:169)
+            at app//org.springframework.data.repository.core.support.RepositoryMethodInvoker.invoke(RepositoryMethodInvoker.java:158)
+            at app//org.springframework.data.repository.core.support.RepositoryComposition$RepositoryFragments.invoke(RepositoryComposition.java:545)
+            at app//org.springframework.data.repository.core.support.RepositoryComposition.invoke(RepositoryComposition.java:290)
+            at app//org.springframework.data.repository.core.support.RepositoryFactorySupport$ImplementationMethodExecutionInterceptor.invoke(RepositoryFactorySupport.java:690)
+            at app//org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:179)
+            at app//org.springframework.data.repository.core.support.QueryExecutorMethodInterceptor.doInvoke(QueryExecutorMethodInterceptor.java:171)
+            at app//org.springframework.data.repository.core.support.QueryExecutorMethodInterceptor.invoke(QueryExecutorMethodInterceptor.java:146)
+            at app//org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:179)
+            at app//org.springframework.data.projection.DefaultMethodInvokingMethodInterceptor.invoke(DefaultMethodInvokingMethodInterceptor.java:69)
+            at app//org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:179)
+            at app//org.springframework.transaction.interceptor.TransactionInterceptor$1.proceedWithInvocation(TransactionInterceptor.java:133)
+            at app//org.springframework.transaction.interceptor.TransactionAspectSupport.invokeWithinTransaction(TransactionAspectSupport.java:371)
+            at app//org.springframework.transaction.interceptor.TransactionInterceptor.invoke(TransactionInterceptor.java:130)
+            at app//org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:179)
+            at app//org.springframework.dao.support.PersistenceExceptionTranslationInterceptor.invoke(PersistenceExceptionTranslationInterceptor.java:135)
+            ... 7 more
+
+            Caused by:
+            java.sql.SQLIntegrityConstraintViolationException: (conn=89) Duplicate entry '111-111' for key 'UK6kplolsdtr3slnvx97xsy2kc8'
+                at org.mariadb.jdbc.export.ExceptionFactory.createException(ExceptionFactory.java:317)
+                at org.mariadb.jdbc.export.ExceptionFactory.create(ExceptionFactory.java:402)
+                at org.mariadb.jdbc.message.ClientMessage.readPacket(ClientMessage.java:195)
+                at org.mariadb.jdbc.client.impl.StandardClient.readPacket(StandardClient.java:1414)
+                at org.mariadb.jdbc.client.impl.StandardClient.readResults(StandardClient.java:1353)
+                at org.mariadb.jdbc.client.impl.StandardClient.readResponse(StandardClient.java:1272)
+                at org.mariadb.jdbc.client.impl.StandardClient.execute(StandardClient.java:1196)
+                at org.mariadb.jdbc.ClientPreparedStatement.executeInternal(ClientPreparedStatement.java:91)
+                at org.mariadb.jdbc.ClientPreparedStatement.executeLargeUpdate(ClientPreparedStatement.java:345)
+                at org.mariadb.jdbc.ClientPreparedStatement.executeUpdate(ClientPreparedStatement.java:322)
+                at com.zaxxer.hikari.pool.ProxyPreparedStatement.executeUpdate(ProxyPreparedStatement.java:61)
+                at com.zaxxer.hikari.pool.HikariProxyPreparedStatement.executeUpdate(HikariProxyPreparedStatement.java)
+                at org.hibernate.engine.jdbc.internal.ResultSetReturnImpl.executeUpdate(ResultSetReturnImpl.java:181)
+                ... 60 more
+Generating HTML test report...
+Finished generating test html results (0.002 secs) into: /Users/kimjuyoung/Desktop/Project/fbrl-backend/build/reports/tests/test
+Finished generating test XML results (0.0 secs) into: /Users/kimjuyoung/Desktop/Project/fbrl-backend/build/test-results/test
+4 actionable tasks: 1 executed, 3 up-to-date
+Watched directory hierarchies: [/Users/kimjuyoung/Desktop/Project/fbrl-backend]
