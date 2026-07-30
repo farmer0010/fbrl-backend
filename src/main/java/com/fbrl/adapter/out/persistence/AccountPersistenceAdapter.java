@@ -24,16 +24,8 @@ public class AccountPersistenceAdapter implements AccountRepositoryPort {
 
   @Override
   public Account save(Account account) {
-    int updatedRows =
-        accountJpaRepository.updateBalanceByAccountNumber(
-            account.getAccountNumber(), account.getBalance().getAmount());
-
-    if (updatedRows == 0) {
-      AccountEntity entity = accountMapper.toEntity(account);
-      AccountEntity savedEntity = accountJpaRepository.save(entity);
-      return accountMapper.toDomain(savedEntity);
-    }
-
-    return account;
+    AccountEntity entity = accountMapper.toEntity(account);
+    AccountEntity savedEntity = accountJpaRepository.save(entity);
+    return accountMapper.toDomain(savedEntity);
   }
 }

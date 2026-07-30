@@ -59,7 +59,7 @@ public final class Money {
 
   @Override
   public int hashCode() {
-    return Objects.hash(amount);
+    return Objects.hash(amount.stripTrailingZeros());
   }
 
   @Override

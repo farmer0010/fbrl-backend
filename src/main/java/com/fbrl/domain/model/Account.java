@@ -4,16 +4,18 @@ import com.fbrl.domain.exception.InsufficientBalanceException;
 import java.util.Objects;
 
 public class Account {
+  private final Long id;
   private final String accountNumber;
   private Money balance;
 
-  public Account(String accountNumber, Money balance) {
+  public Account(Long id, String accountNumber, Money balance) {
+    this.id = id;
     this.accountNumber = Objects.requireNonNull(accountNumber, "계좌번호는 null일 수 없습니다.");
     this.balance = Objects.requireNonNull(balance, "잔액은 null일 수 없습니다.");
   }
 
   public static Account create(String accountNumber, Money initialBalance) {
-    return new Account(accountNumber, initialBalance);
+    return new Account(null, accountNumber, initialBalance);
   }
 
   public void deposit(Money money) {
@@ -28,6 +30,10 @@ public class Account {
       throw new InsufficientBalanceException("잔액이 부족합니다. 현재 잔액: " + balance + ", 요청금액: " + money);
     }
     this.balance = this.balance.subtract(money);
+  }
+
+  public Long getId() {
+    return id;
   }
 
   public String getAccountNumber() {

@@ -1,0 +1,24 @@
+services:
+  mariadb:
+    image: mariadb:11.2
+    container_name: fbrl-mariadb
+    ports:
+      - "3306:3306"
+    environment:
+      MARIADB_ROOT_PASSWORD: rootpassword
+      MARIADB_DATABASE: fbrl_db
+      MARIADB_USER: fbrl_user
+      MARIADB_PASSWORD: fbrlpassword
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    restart: always
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: fbrl-redis
+    ports:
+      - "6379:6379"
+    restart: always
+
+volumes:
+  mariadb_data:
