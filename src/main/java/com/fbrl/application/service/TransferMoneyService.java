@@ -5,11 +5,10 @@ import com.fbrl.application.port.in.TransferMoneyUseCase;
 import com.fbrl.application.port.out.AccountRepositoryPort;
 import com.fbrl.domain.exception.AccountNotFoundException;
 import com.fbrl.domain.model.Account;
+import com.fbrl.global.common.annotation.DistributedLock;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 @Service
-@Transactional
 public class TransferMoneyService implements TransferMoneyUseCase {
 
   private final AccountRepositoryPort accountRepositoryPort;
@@ -19,6 +18,7 @@ public class TransferMoneyService implements TransferMoneyUseCase {
   }
 
   @Override
+  @DistributedLock(key = "#command.senderAccountNumber")
   public void transfer(TransferMoneyCommand command) {
     Account senderAccount =
         accountRepositoryPort

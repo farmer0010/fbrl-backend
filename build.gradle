@@ -1,3 +1,4 @@
+// 빌드 플러그인 설정
 plugins {
 	id 'java'
 	id 'org.springframework.boot' version '4.0.7'
@@ -19,24 +20,38 @@ repositories {
 	mavenCentral()
 }
 
+// 의존성 설정
 dependencies {
+
+	// 웹, 검증, 모니터링
+	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'org.springframework.boot:spring-boot-starter-actuator'
+
+	// 데이터베이스 및 JPA
 	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
 	runtimeOnly 'org.mariadb.jdbc:mariadb-java-client'
 	runtimeOnly 'com.h2database:h2'
-	implementation 'org.springframework.boot:spring-boot-starter-validation'
-	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+
+	implementation 'org.redisson:redisson:3.52.0'
+
+	// Lombok
 	compileOnly 'org.projectlombok:lombok'
 	annotationProcessor 'org.projectlombok:lombok'
+
+	// 테스트 환경
+	testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+	testImplementation 'org.springframework.boot:spring-boot-starter-validation-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-actuator-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
-	testImplementation 'org.springframework.boot:spring-boot-starter-validation-test'
-	testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
-	testCompileOnly 'org.projectlombok:lombok'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+	// Lombok 테스트 환경
+	testCompileOnly 'org.projectlombok:lombok'
 	testAnnotationProcessor 'org.projectlombok:lombok'
 }
 
+// 코드 포맷팅 설정
 spotless {
 	java {
 		googleJavaFormat('1.19.2')
@@ -46,6 +61,7 @@ spotless {
 	}
 }
 
+// 테스트 커버리지 설정
 jacoco {
 	toolVersion = "0.8.11"
 }
@@ -57,6 +73,7 @@ tasks.named('test') {
 
 jacocoTestReport {
 	dependsOn tasks.test
+
 	reports {
 		xml.required = true
 		csv.required = false
