@@ -20,6 +20,10 @@ public class Account {
     return new Account(null, accountNumber, initialBalance, null);
   }
 
+  public static Account open(String accountNumber) {
+    return create(accountNumber, Money.ZERO);
+  }
+
   public void deposit(Money money) {
     Objects.requireNonNull(money, "입금 금액은 null일 수 없습니다.");
     this.balance = this.balance.add(money);
