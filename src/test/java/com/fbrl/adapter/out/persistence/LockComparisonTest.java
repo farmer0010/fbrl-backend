@@ -1,10 +1,9 @@
-package com.fbrl.application.service;
+package com.fbrl.adapter.out.persistence;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.fbrl.adapter.out.persistence.AccountJpaRepository;
-import com.fbrl.adapter.out.persistence.AccountPersistenceAdapter;
 import com.fbrl.application.port.in.TransferMoneyCommand;
+import com.fbrl.application.service.TransferMoneyService;
 import com.fbrl.domain.model.Account;
 import com.fbrl.domain.model.Money;
 import java.math.BigDecimal;

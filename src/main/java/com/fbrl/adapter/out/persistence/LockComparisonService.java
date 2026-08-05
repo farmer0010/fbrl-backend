@@ -1,7 +1,5 @@
-package com.fbrl.application.service;
+package com.fbrl.adapter.out.persistence;
 
-import com.fbrl.adapter.out.persistence.AccountEntity;
-import com.fbrl.adapter.out.persistence.AccountJpaRepository;
 import java.math.BigDecimal;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
