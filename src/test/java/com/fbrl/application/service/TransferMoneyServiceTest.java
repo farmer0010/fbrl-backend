@@ -7,6 +7,8 @@ import static org.mockito.Mockito.verify;
 
 import com.fbrl.application.port.in.TransferMoneyCommand;
 import com.fbrl.application.port.out.AccountRepositoryPort;
+import com.fbrl.application.port.out.PayloadSerializerPort;
+import com.fbrl.application.port.out.SaveOutboxEventPort;
 import com.fbrl.domain.exception.AccountNotFoundException;
 import com.fbrl.domain.model.Account;
 import com.fbrl.domain.model.Money;
@@ -23,6 +25,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 class TransferMoneyServiceTest {
 
   @Mock private AccountRepositoryPort accountRepositoryPort;
+  @Mock private SaveOutboxEventPort saveOutboxEventPort;
+  @Mock private PayloadSerializerPort payloadSerializerPort;
 
   @InjectMocks private TransferMoneyService transferMoneyService;
 
@@ -35,6 +39,8 @@ class TransferMoneyServiceTest {
 
     given(accountRepositoryPort.findByAccountNumber("111-111")).willReturn(Optional.of(sender));
     given(accountRepositoryPort.findByAccountNumber("222-222")).willReturn(Optional.of(receiver));
+    given(payloadSerializerPort.serialize(org.mockito.ArgumentMatchers.any()))
+        .willReturn("{\"dummy\":\"payload\"}");
 
     transferMoneyService.transfer(command);
 
@@ -42,6 +48,7 @@ class TransferMoneyServiceTest {
     assertThat(receiver.getBalance()).isEqualTo(Money.wons(5000));
     verify(accountRepositoryPort).save(sender);
     verify(accountRepositoryPort).save(receiver);
+    verify(saveOutboxEventPort).save(org.mockito.ArgumentMatchers.any());
   }
 
   @Test
