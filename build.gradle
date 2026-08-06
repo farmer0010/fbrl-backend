@@ -38,6 +38,11 @@ dependencies {
 
 	implementation 'org.redisson:redisson:3.52.0'
 
+	// Kafka — Boot 4.0 모듈 분리로 인해 순수 spring-kafka가 아닌 starter를 써야
+	// KafkaAutoConfiguration/KafkaProperties 자동설정 모듈까지 함께 들어온다.
+	implementation 'org.springframework.boot:spring-boot-starter-kafka'
+	testImplementation 'org.springframework.boot:spring-boot-starter-kafka-test'
+
 	// Lombok
 	compileOnly 'org.projectlombok:lombok'
 	annotationProcessor 'org.projectlombok:lombok'
