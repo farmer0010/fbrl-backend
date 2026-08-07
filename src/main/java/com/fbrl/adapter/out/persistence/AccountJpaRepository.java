@@ -7,7 +7,7 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
-interface AccountJpaRepository extends JpaRepository<AccountEntity, Long> {
+public interface AccountJpaRepository extends JpaRepository<AccountEntity, Long> {
 
   Optional<AccountEntity> findByAccountNumber(String accountNumber);
 

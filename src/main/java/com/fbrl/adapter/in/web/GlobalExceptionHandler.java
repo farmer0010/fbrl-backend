@@ -2,6 +2,7 @@ package com.fbrl.adapter.in.web;
 
 import com.fbrl.adapter.in.web.dto.ErrorResponse;
 import com.fbrl.domain.exception.AccountNotFoundException;
+import com.fbrl.domain.exception.AccountPersistenceException;
 import com.fbrl.domain.exception.DuplicateAccountNumberException;
 import com.fbrl.domain.exception.InsufficientBalanceException;
 import com.fbrl.domain.exception.InvalidMoneyException;
@@ -51,5 +52,12 @@ public class GlobalExceptionHandler {
       DuplicateAccountNumberException e) {
     return ResponseEntity.status(HttpStatus.CONFLICT)
         .body(ErrorResponse.of("DUPLICATE_ACCOUNT_NUMBER", e.getMessage()));
+  }
+
+  @ExceptionHandler(AccountPersistenceException.class)
+  public ResponseEntity<ErrorResponse> handleAccountPersistenceException(
+      AccountPersistenceException e) {
+    return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+        .body(ErrorResponse.of("INTERNAL_SERVER_ERROR", "서버 내부 오류가 발생했습니다."));
   }
 }
