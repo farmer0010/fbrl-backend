@@ -9,7 +9,7 @@ public class Account {
   private Money balance;
   private final Long version;
 
-  public Account(Long id, String accountNumber, Money balance, Long version) {
+  private Account(Long id, String accountNumber, Money balance, Long version) {
     this.id = id;
     this.accountNumber = Objects.requireNonNull(accountNumber, "계좌번호는 null일 수 없습니다.");
     this.balance = Objects.requireNonNull(balance, "잔액은 null일 수 없습니다.");
@@ -22,6 +22,10 @@ public class Account {
 
   public static Account open(String accountNumber) {
     return create(accountNumber, Money.ZERO);
+  }
+
+  public static Account reconstruct(Long id, String accountNumber, Money balance, Long version) {
+    return new Account(id, accountNumber, balance, version);
   }
 
   public void deposit(Money money) {
