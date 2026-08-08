@@ -41,4 +41,8 @@ public class AccountPersistenceAdapter implements AccountRepositoryPort {
           "이미 존재하는 계좌번호입니다. 계좌번호: " + account.getAccountNumber());
     }
   }
+
+  public void deleteAllInBatch() {
+    accountJpaRepository.deleteAllInBatch();
+  }
 }

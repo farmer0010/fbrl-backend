@@ -2,7 +2,6 @@ package com.fbrl.application.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.fbrl.adapter.out.persistence.AccountJpaRepository;
 import com.fbrl.adapter.out.persistence.AccountPersistenceAdapter;
 import com.fbrl.application.port.in.TransferMoneyCommand;
 import com.fbrl.domain.model.Account;
@@ -23,8 +22,6 @@ class TransferConcurrencyTest {
 
   @Autowired private TransferMoneyService transferMoneyService;
 
-  @Autowired private AccountJpaRepository accountJpaRepository;
-
   @Autowired private AccountPersistenceAdapter accountPersistenceAdapter;
 
   private final String SENDER_ACCOUNT_NUMBER = "111-111";
@@ -32,13 +29,13 @@ class TransferConcurrencyTest {
 
   @BeforeEach
   void setUp() {
-    accountJpaRepository.deleteAllInBatch();
+    accountPersistenceAdapter.deleteAllInBatch();
 
     accountPersistenceAdapter.save(
-        new Account(null, SENDER_ACCOUNT_NUMBER, Money.of(BigDecimal.valueOf(1_000_000)), null));
+        Account.create(SENDER_ACCOUNT_NUMBER, Money.of(BigDecimal.valueOf(1_000_000))));
 
     accountPersistenceAdapter.save(
-        new Account(null, RECEIVER_ACCOUNT_NUMBER, Money.of(BigDecimal.ZERO), null));
+        Account.create(RECEIVER_ACCOUNT_NUMBER, Money.of(BigDecimal.ZERO)));
   }
 
   @Test

@@ -1,11 +1,7 @@
 package com.fbrl.adapter.in.web;
 
 import com.fbrl.adapter.in.web.dto.ErrorResponse;
-import com.fbrl.domain.exception.AccountNotFoundException;
-import com.fbrl.domain.exception.AccountPersistenceException;
-import com.fbrl.domain.exception.DuplicateAccountNumberException;
-import com.fbrl.domain.exception.InsufficientBalanceException;
-import com.fbrl.domain.exception.InvalidMoneyException;
+import com.fbrl.domain.exception.*;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -59,5 +55,20 @@ public class GlobalExceptionHandler {
       AccountPersistenceException e) {
     return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
         .body(ErrorResponse.of("INTERNAL_SERVER_ERROR", "서버 내부 오류가 발생했습니다."));
+  }
+
+  @ExceptionHandler(SagaPersistenceException.class)
+  public ResponseEntity<ErrorResponse> handleSagaPersistenceException(SagaPersistenceException e) {
+    return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+        .body(ErrorResponse.of("INTERNAL_SERVER_ERROR", "서버 내부 오류가 발생했습니다."));
+  }
+
+  @ExceptionHandler(ConcurrentSagaModificationException.class)
+  public ResponseEntity<ErrorResponse> handleConcurrentSagaModificationException(
+      ConcurrentSagaModificationException e) {
+    return ResponseEntity.status(HttpStatus.CONFLICT)
+        .body(
+            ErrorResponse.of(
+                "CONCURRENT_SAGA_MODIFICATION", "다른 요청이 동시에 처리 중입니다. 잠시 후 다시 시도해주세요."));
   }
 }

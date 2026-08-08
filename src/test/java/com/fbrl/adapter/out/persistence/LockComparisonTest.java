@@ -41,10 +41,9 @@ class LockComparisonTest {
   void setUp() {
     accountJpaRepository.deleteAllInBatch();
 
-    accountPersistenceAdapter.save(
-        new Account(null, SENDER, Money.of(BigDecimal.valueOf(1_000_000)), null));
+    accountPersistenceAdapter.save(Account.create(SENDER, Money.of(BigDecimal.valueOf(1_000_000))));
 
-    accountPersistenceAdapter.save(new Account(null, RECEIVER, Money.of(BigDecimal.ZERO), null));
+    accountPersistenceAdapter.save(Account.create(RECEIVER, Money.of(BigDecimal.ZERO)));
   }
 
   @Test
