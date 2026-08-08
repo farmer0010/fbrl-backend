@@ -5,7 +5,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.fbrl.adapter.in.web.dto.TransferMoneyRequest;
-import com.fbrl.adapter.out.persistence.AccountJpaRepository;
 import com.fbrl.adapter.out.persistence.AccountPersistenceAdapter;
 import com.fbrl.domain.model.Account;
 import com.fbrl.domain.model.Money;
@@ -30,8 +29,6 @@ class IdempotencyIntegrationTest {
 
   @Autowired private ObjectMapper objectMapper;
 
-  @Autowired private AccountJpaRepository accountJpaRepository;
-
   @Autowired private AccountPersistenceAdapter accountPersistenceAdapter;
 
   private final String SENDER_ACCOUNT = "111-111";
@@ -39,13 +36,12 @@ class IdempotencyIntegrationTest {
 
   @BeforeEach
   void setUp() {
-    accountJpaRepository.deleteAllInBatch();
+    accountPersistenceAdapter.deleteAllInBatch();
 
     accountPersistenceAdapter.save(
-        new Account(null, SENDER_ACCOUNT, Money.of(BigDecimal.valueOf(1_000_000)), null));
+        Account.create(SENDER_ACCOUNT, Money.of(BigDecimal.valueOf(1_000_000))));
 
-    accountPersistenceAdapter.save(
-        new Account(null, RECEIVER_ACCOUNT, Money.of(BigDecimal.ZERO), null));
+    accountPersistenceAdapter.save(Account.create(RECEIVER_ACCOUNT, Money.of(BigDecimal.ZERO)));
   }
 
   @Test

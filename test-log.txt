@@ -121,10 +121,10 @@ Starting process 'Gradle Test Executor 21'. Working directory: /Users/kimjuyoung
 Successfully started process 'Gradle Test Executor 21'
 
 락 3대장(Redisson 분산 락 vs 비관적 락 vs 낙관적 락) 성능 비교 테스트 STANDARD_OUT
-    15:58:20.835 [Test worker] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [com.fbrl.application.service.LockComparisonTest]: LockComparisonTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
-    15:58:20.890 [Test worker] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration com.fbrl.FbrlBackendApplication for test class com.fbrl.application.service.LockComparisonTest
-    15:58:20.931 [Test worker] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [com.fbrl.application.service.LockComparisonTest]: LockComparisonTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
-    15:58:20.932 [Test worker] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration com.fbrl.FbrlBackendApplication for test class com.fbrl.application.service.LockComparisonTest
+    15:58:20.835 [Test worker] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [com.fbrl.adapter.out.persistence.LockComparisonTest]: LockComparisonTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+    15:58:20.890 [Test worker] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration com.fbrl.FbrlBackendApplication for test class com.fbrl.adapter.out.persistence.LockComparisonTest
+    15:58:20.931 [Test worker] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [com.fbrl.adapter.out.persistence.LockComparisonTest]: LockComparisonTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+    15:58:20.932 [Test worker] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration com.fbrl.FbrlBackendApplication for test class com.fbrl.adapter.out.persistence.LockComparisonTest
 
       .   ____          _            __ _ _
      /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
@@ -233,7 +233,7 @@ Gradle Test Executor 21 finished executing tests.
         at app//org.springframework.aop.framework.JdkDynamicAopProxy.invoke(JdkDynamicAopProxy.java:222)
         at app/jdk.proxy3/jdk.proxy3.$Proxy180.save(Unknown Source)
         at app//com.fbrl.adapter.out.persistence.AccountPersistenceAdapter.save(AccountPersistenceAdapter.java:28)
-        at app//com.fbrl.application.service.LockComparisonTest.setUp(LockComparisonTest.java:37)
+        at app//com.fbrl.adapter.out.persistence.LockComparisonTest.setUp(LockComparisonTest.java:37)
 
         Caused by:
         org.hibernate.exception.ConstraintViolationException: could not execute statement [(conn=89) Duplicate entry '111-111' for key 'UK6kplolsdtr3slnvx97xsy2kc8'] [insert into accounts (account_number,balance,version) values (?,?,?)]
@@ -364,7 +364,7 @@ Gradle Test Executor 21 finished executing tests.
         at app//org.springframework.aop.framework.JdkDynamicAopProxy.invoke(JdkDynamicAopProxy.java:222)
         at app/jdk.proxy3/jdk.proxy3.$Proxy180.save(Unknown Source)
         at app//com.fbrl.adapter.out.persistence.AccountPersistenceAdapter.save(AccountPersistenceAdapter.java:28)
-        at app//com.fbrl.application.service.LockComparisonTest.setUp(LockComparisonTest.java:37)
+        at app//com.fbrl.adapter.out.persistence.LockComparisonTest.setUp(LockComparisonTest.java:37)
 
         Caused by:
         org.hibernate.exception.ConstraintViolationException: could not execute statement [(conn=89) Duplicate entry '111-111' for key 'UK6kplolsdtr3slnvx97xsy2kc8'] [insert into accounts (account_number,balance,version) values (?,?,?)]
@@ -495,7 +495,7 @@ Gradle Test Executor 21 finished executing tests.
         at app//org.springframework.aop.framework.JdkDynamicAopProxy.invoke(JdkDynamicAopProxy.java:222)
         at app/jdk.proxy3/jdk.proxy3.$Proxy180.save(Unknown Source)
         at app//com.fbrl.adapter.out.persistence.AccountPersistenceAdapter.save(AccountPersistenceAdapter.java:28)
-        at app//com.fbrl.application.service.LockComparisonTest.setUp(LockComparisonTest.java:37)
+        at app//com.fbrl.adapter.out.persistence.LockComparisonTest.setUp(LockComparisonTest.java:37)
 
         Caused by:
         org.hibernate.exception.ConstraintViolationException: could not execute statement [(conn=89) Duplicate entry '111-111' for key 'UK6kplolsdtr3slnvx97xsy2kc8'] [insert into accounts (account_number,balance,version) values (?,?,?)]

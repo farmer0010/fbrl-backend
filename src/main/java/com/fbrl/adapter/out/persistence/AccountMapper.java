@@ -10,7 +10,7 @@ public class AccountMapper {
     if (entity == null) {
       return null;
     }
-    return new Account(
+    return Account.reconstruct(
         entity.getId(),
         entity.getAccountNumber(),
         Money.of(entity.getBalance()),
