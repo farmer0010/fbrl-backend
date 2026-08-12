@@ -58,6 +58,9 @@ dependencies {
 	// Lombok 테스트 환경
 	testCompileOnly 'org.projectlombok:lombok'
 	testAnnotationProcessor 'org.projectlombok:lombok'
+
+	implementation 'org.springframework.boot:spring-boot-starter-batch'
+	testImplementation 'org.springframework.batch:spring-batch-test'
 }
 
 // 코드 포맷팅 설정
