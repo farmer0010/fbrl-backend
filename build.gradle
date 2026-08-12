@@ -30,6 +30,8 @@ dependencies {
 
 	// Redis
 	implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+	implementation 'net.javacrumbs.shedlock:shedlock-spring:7.7.0'
+	implementation 'net.javacrumbs.shedlock:shedlock-provider-redis-spring:7.7.0'
 
 	// 데이터베이스 및 JPA
 	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
