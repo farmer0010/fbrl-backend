@@ -56,3 +56,12 @@ outbox:
   polling:
     fixed-delay-ms: 3000
     batch-size: 100
+
+k8s:
+  leader-election:
+    enabled: false
+    namespace: default
+    lease-name: eod-settlement-leader
+    lease-duration-seconds: 15
+    renew-deadline-seconds: 10
+    retry-period-seconds: 2
