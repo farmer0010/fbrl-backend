@@ -3,14 +3,20 @@ package com.fbrl.application.service;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fbrl.adapter.out.persistence.AccountPersistenceAdapter;
+import com.fbrl.adapter.out.persistence.EodSnapshotPersistenceAdapter;
+import com.fbrl.adapter.out.persistence.LedgerEntryPersistenceAdapter;
 import com.fbrl.adapter.out.persistence.OutboxPersistenceAdapter;
 import com.fbrl.application.port.in.TransferMoneyCommand;
 import com.fbrl.application.port.in.VerifyAuditChainUseCase;
 import com.fbrl.application.port.in.VerifyAuditChainUseCase.AuditChainVerificationResult;
+import com.fbrl.application.port.out.SaveLedgerEntryPort;
 import com.fbrl.domain.model.Account;
+import com.fbrl.domain.model.LedgerDirection;
+import com.fbrl.domain.model.LedgerEntry;
 import com.fbrl.domain.model.Money;
 import com.fbrl.domain.model.OutboxEvent;
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
@@ -30,20 +36,32 @@ class OutboxChainConcurrencyTest {
   @Autowired private TransferMoneyService transferMoneyService;
   @Autowired private AccountPersistenceAdapter accountPersistenceAdapter;
   @Autowired private OutboxPersistenceAdapter outboxPersistenceAdapter;
+  @Autowired private LedgerEntryPersistenceAdapter ledgerEntryPersistenceAdapter;
+  @Autowired private EodSnapshotPersistenceAdapter eodSnapshotPersistenceAdapter;
+  @Autowired private SaveLedgerEntryPort saveLedgerEntryPort;
   @Autowired private VerifyAuditChainUseCase verifyAuditChainUseCase;
 
   private static final int PAIR_COUNT = 50;
 
   @BeforeEach
   void setUp() {
+    ledgerEntryPersistenceAdapter.deleteAllInBatch();
+    eodSnapshotPersistenceAdapter.deleteAllInBatch();
     accountPersistenceAdapter.deleteAllInBatch();
     outboxPersistenceAdapter.deleteAllInBatch();
 
     for (int i = 0; i < PAIR_COUNT; i++) {
-      accountPersistenceAdapter.save(
-          Account.create(senderAccountNumber(i), Money.of(BigDecimal.valueOf(100_000))));
-      accountPersistenceAdapter.save(
-          Account.create(receiverAccountNumber(i), Money.of(BigDecimal.ZERO)));
+      accountPersistenceAdapter.save(Account.create(senderAccountNumber(i)));
+      accountPersistenceAdapter.save(Account.create(receiverAccountNumber(i)));
+
+      saveLedgerEntryPort.saveAll(
+          List.of(
+              LedgerEntry.of(
+                  senderAccountNumber(i),
+                  LedgerDirection.CREDIT,
+                  Money.wons(100_000),
+                  "TEST_SEED",
+                  Instant.now())));
     }
   }
 
