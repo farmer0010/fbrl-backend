@@ -24,7 +24,7 @@
 ```mermaid
 graph TB
     subgraph adapter_in["adapter.in — 입력 어댑터"]
-        WEB["web<br/>(AccountController, TransferMoneyController)"]
+        WEB["web<br/>(AccountController, TransferMoneyController, AuditController)"]
         KAFKA_IN["kafka<br/>(TransferEventConsumer)"]
         BATCH["batch<br/>(EodSettlementJobConfig)"]
         SCHED["scheduler<br/>(EodSettlementScheduler)"]
@@ -79,6 +79,7 @@ graph TB
 - Redisson 분산 락 (`@DistributedLock` AOP, REQUIRES_NEW 트랜잭션 분리)
 - API 멱등성 (Redis SETNX 기반 `@CheckIdempotency`)
 - Transactional Outbox 패턴 + Debezium CDC 기반 발행 (PostgreSQL 논리적 복제, 폴링 없이 WAL 기반으로 실시간에 가깝게 Kafka 발행)
+- 해시체인 기반 불변 감사로그 (`OutboxEvent`가 직전 항목의 SHA-256 해시를 포함, `outbox_chain_tail` 단일 행 `SELECT ... FOR UPDATE`로 동시 삽입 시 체인 분기 방지, `GET /api/v1/audit/verify`로 전체 체인 무결성 검증)
 - Saga 오케스트레이션 (`TransferSaga` 상태 머신 + 보상 트랜잭션, Choreography 대신 Orchestration 채택)
 
 ### 트랙 2 — EOD 대규모 정산 배치
@@ -103,6 +104,7 @@ curl -X POST -H "Content-Type: application/json" \
 ```
 
 - 계좌 개설/조회, 이체 API는 `localhost:8080`에서 확인할 수 있습니다.
+- 감사로그 체인 무결성은 `GET /api/v1/audit/verify`로 확인할 수 있습니다 (`{"valid":true,"totalEntries":N}`, 변조 시 `brokenAtId`/`reason` 포함).
 - EOD 정산 배치는 기본적으로 자동 실행되지 않습니다 (`spring.batch.job.enabled: false`) — 파드 재시작 시 중복 실행을 방지하기 위함이며, `EodSettlementScheduler`의 cron 설정(`eod.batch.cron`)을 통해 트리거됩니다.
 - Kubernetes Lease 리더 선출 검증은 kind 등 로컬 클러스터와 `k8s/rbac/` 매니페스트 적용이 별도로 필요하며, 기본값은 비활성화(`k8s.leader-election.enabled: false`)되어 있습니다.
 - 실제 접속 정보(DB/Redis 계정 등)는 `src/main/resources/application.yaml` 및 `docker-compose.yml`을 직접 참고하세요. 이 문서에는 시크릿 값을 기재하지 않습니다.
