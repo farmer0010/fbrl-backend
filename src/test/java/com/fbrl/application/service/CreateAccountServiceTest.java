@@ -9,7 +9,6 @@ import static org.mockito.Mockito.verify;
 
 import com.fbrl.domain.exception.DuplicateAccountNumberException;
 import com.fbrl.domain.model.Account;
-import com.fbrl.domain.model.Money;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -24,7 +23,7 @@ class CreateAccountServiceTest {
   @Mock private AccountCreationExecutor accountCreationExecutor;
 
   @Test
-  @DisplayName("계좌 생성 성공 시 잔액 0원인 계좌를 반환한다.")
+  @DisplayName("계좌 생성 성공 시 채번된 계좌번호를 가진 계좌를 반환한다.")
   void createAccountSuccess() {
     given(accountNumberPolicy.generate()).willReturn("110-0001-0001");
     given(accountCreationExecutor.createInNewTransaction("110-0001-0001"))
@@ -34,7 +33,7 @@ class CreateAccountServiceTest {
         new CreateAccountService(accountNumberPolicy, accountCreationExecutor);
     Account result = sut.createAccount();
 
-    assertThat(result.getBalance()).isEqualTo(Money.ZERO);
+    assertThat(result.getAccountNumber()).isEqualTo("110-0001-0001");
   }
 
   @Test

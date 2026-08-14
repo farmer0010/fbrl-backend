@@ -1,45 +1,46 @@
 package com.fbrl.domain.model;
 
-import com.fbrl.domain.exception.InsufficientBalanceException;
+import java.util.List;
 import java.util.Objects;
 
 public class Account {
   private final Long id;
   private final String accountNumber;
-  private Money balance;
   private final Long version;
 
-  private Account(Long id, String accountNumber, Money balance, Long version) {
+  private Account(Long id, String accountNumber, Long version) {
     this.id = id;
     this.accountNumber = Objects.requireNonNull(accountNumber, "계좌번호는 null일 수 없습니다.");
-    this.balance = Objects.requireNonNull(balance, "잔액은 null일 수 없습니다.");
     this.version = version;
   }
 
-  public static Account create(String accountNumber, Money initialBalance) {
-    return new Account(null, accountNumber, initialBalance, null);
+  public static Account create(String accountNumber) {
+    return new Account(null, accountNumber, null);
   }
 
   public static Account open(String accountNumber) {
-    return create(accountNumber, Money.ZERO);
+    return create(accountNumber);
   }
 
-  public static Account reconstruct(Long id, String accountNumber, Money balance, Long version) {
-    return new Account(id, accountNumber, balance, version);
+  public static Account reconstruct(Long id, String accountNumber, Long version) {
+    return new Account(id, accountNumber, version);
   }
 
-  public void deposit(Money money) {
-    Objects.requireNonNull(money, "입금 금액은 null일 수 없습니다.");
-    this.balance = this.balance.add(money);
-  }
+  public Money calculateBalance(Money anchorBalance, List<LedgerEntry> entriesSinceAnchor) {
+    Objects.requireNonNull(anchorBalance, "앵커 잔액은 null일 수 없습니다.");
+    Objects.requireNonNull(entriesSinceAnchor, "델타 원장 목록은 null일 수 없습니다.");
 
-  public void withdraw(Money money) {
-    Objects.requireNonNull(money, "출금 금액은 null일 수 없습니다.");
-
-    if (!this.balance.isGreaterThanOrEqual(money)) {
-      throw new InsufficientBalanceException("잔액이 부족합니다. 현재 잔액: " + balance + ", 요청금액: " + money);
+    Money creditTotal = Money.ZERO;
+    Money debitTotal = Money.ZERO;
+    for (LedgerEntry entry : entriesSinceAnchor) {
+      if (entry.direction() == LedgerDirection.CREDIT) {
+        creditTotal = creditTotal.add(entry.amount());
+      } else {
+        debitTotal = debitTotal.add(entry.amount());
+      }
     }
-    this.balance = this.balance.subtract(money);
+
+    return anchorBalance.add(creditTotal).subtract(debitTotal);
   }
 
   public Long getId() {
@@ -48,10 +49,6 @@ public class Account {
 
   public String getAccountNumber() {
     return accountNumber;
-  }
-
-  public Money getBalance() {
-    return balance;
   }
 
   public Long getVersion() {

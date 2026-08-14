@@ -3,10 +3,15 @@ package com.fbrl.adapter.out.persistence;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fbrl.application.port.in.TransferMoneyCommand;
+import com.fbrl.application.port.out.SaveLedgerEntryPort;
+import com.fbrl.application.service.AccountBalanceCalculator;
 import com.fbrl.application.service.TransferMoneyService;
 import com.fbrl.domain.model.Account;
+import com.fbrl.domain.model.LedgerDirection;
+import com.fbrl.domain.model.LedgerEntry;
 import com.fbrl.domain.model.Money;
-import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -21,29 +26,53 @@ import org.springframework.boot.test.context.SpringBootTest;
 
 @SpringBootTest
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-@DisplayName("락 (Redisson 분산 락 vs 비관적 락 vs 낙관적 락) 성능 비교 테스트")
+@DisplayName("락 (Redisson 분산 락 vs 비관적 락 vs 낙관적 락) 성능 비교 테스트 — AccountLockAnchor 기반")
 class LockComparisonTest {
 
   @Autowired private TransferMoneyService transferMoneyService;
 
   @Autowired private LockComparisonService lockComparisonService;
 
+  @Autowired private AccountLockAnchorJpaRepository accountLockAnchorJpaRepository;
+
   @Autowired private AccountJpaRepository accountJpaRepository;
 
   @Autowired private AccountPersistenceAdapter accountPersistenceAdapter;
 
+  @Autowired private LedgerEntryPersistenceAdapter ledgerEntryPersistenceAdapter;
+
+  @Autowired private EodSnapshotJpaRepository eodSnapshotJpaRepository;
+
+  @Autowired private SaveLedgerEntryPort saveLedgerEntryPort;
+
+  @Autowired private AccountBalanceCalculator accountBalanceCalculator;
+
   private final String SENDER = "111-111";
   private final String RECEIVER = "222-222";
   private final int THREAD_COUNT = 100;
-  private final BigDecimal AMOUNT = BigDecimal.valueOf(10_000);
+  private final Money AMOUNT = Money.wons(10_000);
 
   @BeforeEach
   void setUp() {
+    ledgerEntryPersistenceAdapter.deleteAllInBatch();
+    eodSnapshotJpaRepository.deleteAllInBatch();
+    accountLockAnchorJpaRepository.deleteAllInBatch();
     accountJpaRepository.deleteAllInBatch();
 
-    accountPersistenceAdapter.save(Account.create(SENDER, Money.of(BigDecimal.valueOf(1_000_000))));
+    accountPersistenceAdapter.save(Account.create(SENDER));
+    accountPersistenceAdapter.save(Account.create(RECEIVER));
 
-    accountPersistenceAdapter.save(Account.create(RECEIVER, Money.of(BigDecimal.ZERO)));
+    lockComparisonService.ensureAnchor(SENDER);
+    lockComparisonService.ensureAnchor(RECEIVER);
+
+    saveLedgerEntryPort.saveAll(
+        List.of(
+            LedgerEntry.of(
+                SENDER,
+                LedgerDirection.CREDIT,
+                Money.wons(1_000_000),
+                "TEST_SEED",
+                Instant.now())));
   }
 
   @Test
@@ -56,7 +85,7 @@ class LockComparisonTest {
     ExecutorService executor = Executors.newFixedThreadPool(32);
     CountDownLatch latch = new CountDownLatch(THREAD_COUNT);
 
-    TransferMoneyCommand command = new TransferMoneyCommand(SENDER, RECEIVER, Money.of(AMOUNT));
+    TransferMoneyCommand command = new TransferMoneyCommand(SENDER, RECEIVER, AMOUNT);
 
     for (int i = 0; i < THREAD_COUNT; i++) {
       executor.submit(
@@ -75,14 +104,14 @@ class LockComparisonTest {
 
     printResult("🚀 [1. Redisson 분산 락]", endTime - startTime);
 
-    Account sender = accountPersistenceAdapter.findByAccountNumber(SENDER).orElseThrow();
+    Money senderBalance = accountBalanceCalculator.calculate(Account.create(SENDER));
 
-    assertThat(sender.getBalance()).isEqualTo(Money.of(BigDecimal.ZERO));
+    assertThat(senderBalance).isEqualTo(Money.ZERO);
   }
 
   @Test
   @Order(2)
-  @DisplayName("2. JPA 비관적 락(Pessimistic Lock) 100개 동시 송금 성능 측정")
+  @DisplayName("2. JPA 비관적 락(Pessimistic Lock, AccountLockAnchor 대상) 100개 동시 송금 성능 측정")
   void testPessimisticLock() throws InterruptedException {
 
     long startTime = System.currentTimeMillis();
@@ -107,14 +136,14 @@ class LockComparisonTest {
 
     printResult("🔒 [2. JPA 비관적 락]", endTime - startTime);
 
-    Account sender = accountPersistenceAdapter.findByAccountNumber(SENDER).orElseThrow();
+    Money senderBalance = accountBalanceCalculator.calculate(Account.create(SENDER));
 
-    assertThat(sender.getBalance()).isEqualTo(Money.of(BigDecimal.ZERO));
+    assertThat(senderBalance).isEqualTo(Money.ZERO);
   }
 
   @Test
   @Order(3)
-  @DisplayName("3. JPA 낙관적 락(Optimistic Lock + Retry) 100개 동시 송금 성능 측정")
+  @DisplayName("3. JPA 낙관적 락(Optimistic Lock + Retry, AccountLockAnchor 대상) 100개 동시 송금 성능 측정")
   void testOptimisticLock() throws InterruptedException {
 
     long startTime = System.currentTimeMillis();
@@ -148,9 +177,9 @@ class LockComparisonTest {
 
     printResult("⚡ [3. JPA 낙관적 락]", endTime - startTime);
 
-    Account sender = accountPersistenceAdapter.findByAccountNumber(SENDER).orElseThrow();
+    Money senderBalance = accountBalanceCalculator.calculate(Account.create(SENDER));
 
-    assertThat(sender.getBalance()).isEqualTo(Money.of(BigDecimal.ZERO));
+    assertThat(senderBalance).isEqualTo(Money.ZERO);
   }
 
   private void printResult(String lockType, long elapsedTime) {

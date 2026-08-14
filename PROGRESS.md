@@ -14,7 +14,7 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 ## 기술 스택
 
 - Java 17 / Spring Boot 4.0.7 / 헥사고날 아키텍처 (Ports & Adapters)
-- MariaDB (테스트) / PostgreSQL (향후 고려)
+- PostgreSQL 16 (wal_level=logical, Debezium CDC 기반)
 - Redisson, Redis / Spring Batch 6.0.4 · ShedLock · Kafka · Kubernetes Lease API (client-java 27.0.0) · Resilience4j
 
 ## ✅ 완료된 작업
@@ -336,14 +336,49 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 - Boot 4.0: `spring-boot-starter-aop`가 `spring-boot-starter-aspectj`로 리네임됨(공식 이슈 #42948). 기존 이름으로 의존성을 추가하면 "버전을 찾을 수 없음" 형태의 에러가 나서 마치 버전 문제처럼 보이지만 실제로는 그 이름의 아티팩트 자체가 더 이상 없는 것 — Kafka starter, webmvc-test 패키지 이동과 동일 계열의 함정
 - Boot 4.0: `@MockBean`/`@SpyBean` 완전 제거(3.4부터 deprecated, 4.0에서 삭제), `org.springframework.test.context.bean.override.mockito.MockitoBean`/`MockitoSpyBean`으로 교체 필요
 
+### 과제 13: 복식부기 원장(Double-entry Ledger) 도입 (완료)
+
+브랜치: `feat/double-entry-ledger` → `develop`
+
+**배경**
+
+- 기존 `Account.balance`는 이체마다 직접 +/- 되는 저장 필드(read-modify-write)였음 — 이를 "해당 계좌 `LedgerEntry`의 합"으로 계산되는 파생값(SSOT)으로 전환. 목표는 append-only INSERT만으로 잔액 정합성을 자체 검증 가능하게 만드는 것(대차평형/trial balance 원칙).
+- 코드 작성 전에 4가지 설계 결정을 옵션(a/b/c) + 트레이드오프로 먼저 보고하고 사용자 확정을 받은 뒤 구현 — 이번 세션에서 처음으로 "설계 승인 → 구현" 2단계 워크플로를 적용.
+
+**설계 결정**
+
+1. **잔액 계산 시점 — 앵커+델타 하이브리드**: 가장 최근 `EodSnapshot.totalBalance()`를 앵커로 삼고, 그 이후 발생한 `LedgerEntry` 합을 델타로 더함(`AccountBalanceCalculator`). 매일 EOD가 지날 때마다 델타 구간이 리셋되어 스캔 범위가 항상 "최대 하루치"로 bounded됨 — 순수 실시간 전체 합산(스캔 비용 무제한 증가) vs 캐시 필드(SSOT 이원화) 사이 절충안으로 채택.
+2. **동시성 제어 — 기존 Redisson 분산 락 유지, DB CHECK 제약 미도입**: 잔액이 LedgerEntry SUM 파생값이 되면 "잔액 음수 금지"는 집계 제약이라 PostgreSQL `CHECK`로 직접 표현 불가(다른 행을 참조/집계 불가) — 트리거로 우회하면 매 이체마다 전체 스캔이 재발해 애초 목표(append-only)와 역행하므로 기각. 락 보유 구간 안에서 애플리케이션 레벨로 계산한 잔액이 요청 금액 이상인지 확인 후 커밋.
+3. **마이그레이션 — opening-balance 시딩 후 balance 필드 제거, 순서 강제**: `OpeningBalanceMigrationService`가 기존 balance 값을 보존하는 `OPENING_BALANCE` `LedgerEntry` 쌍(상대계정: `SystemAccounts.OPENING_BALANCE_SOURCE`, accounts 테이블에 실제 row 없는 sentinel)으로 시딩. `LedgerEntry.transferPair`를 재사용해 상대계정 없는 단일 다리 시딩(대차평형 깨짐)을 원천적으로 배제 — 지시서 문구("1건씩")보다 대차평형 원칙을 우선함을 명시적으로 근거 들어 반영.
+4. **대차평형 검증 — 거래 단위 즉시(구조적 강제) + 시스템 전체는 EOD 배치**: `LedgerEntry.transferPair(from, to, amount, txId, at)`가 두 다리에 동일한 `amount` 인스턴스를 재사용하는 시그니처라서 합이 0이 아닌 쌍 자체를 만들 수 없음(validate-after가 아닌 invariant-by-construction). 시스템 전체 SUM=0 검증은 `VerifyTrialBalanceUseCase`/`VerifyTrialBalanceService`로 구현해 `EodSettlementJobConfig`의 `eodSettlementJob`에 `trialBalanceVerificationStep`으로 추가 — 불일치 시 `TrialBalanceViolationException`으로 배치 스텝이 실패해 알림.
+
+**추가 반영 (설계 확정 후 리뷰에서 지적됨)**
+
+- `SystemAccounts.OPENING_BALANCE_SOURCE`를 `domain.model`의 SSOT 상수로 추출(`OpeningBalanceMigrationService`/`TransferMoneyService` 공용 참조). 처음엔 accounts 테이블에 해당 row가 "없어서" 조회 실패로 우연히 이체가 막히는 구조였는데, 나중에 어떤 경로로든 이 계좌번호로 실제 Account row가 생기면 방어가 조용히 사라지는 문제가 있어 `TransferMoneyService`에 명시적 가드 클로즈(`assertNotReservedAccount`)를 추가하고 `ReservedAccountException`(`domain.exception`)을 던지도록 변경.
+
+**리팩토링**
+
+- `Account.balance` 저장 필드/`deposit()`/`withdraw()` 제거, 순수 함수 `calculateBalance(anchorBalance, entriesSinceAnchor)`로 전환(포트 의존 없이 도메인 순수성 유지, 앵커·델타 조회는 application 계층의 `AccountBalanceCalculator`가 담당).
+- `LockComparisonService`(과제 1-2, 비관적/낙관적/Redisson 3종 락 벤치마크 — 감사에서도 "의도된 인프라 벤치마크 도구"로 재확인된 이력)는 `balance` 컬럼이 사라지면서 전제가 깨져, 락 비교 대상을 신규 `AccountLockAnchorJpaEntity`(`@Version` 보유, 도메인 모델 매핑 없이 인프라 계층에서만 쓰는 전용 엔티티)로 교체해 벤치마크 목적 자체는 그대로 보존. 실제 이체 경로(`TransferMoneyService`, `Withdrawal·DepositParticipantAdapter`)는 여전히 Redisson 분산 락만 사용.
+
+**트러블슈팅**
+
+- 이 프로젝트는 Flyway/Liquibase 없이 `ddl-auto: update`만 사용 — `balance` 필드를 Java 엔티티에서 지워도 Hibernate가 기존 물리 컬럼을 DROP하지 않아, 로컬 Postgres에 남아있던 `NOT NULL balance` 컬럼 때문에 모든 계좌 INSERT가 깨짐(`DataIntegrityViolationException` → 엉뚱하게 `DuplicateAccountNumberException`으로 오역). 컬럼이 비어있음을 확인 후 `ALTER TABLE accounts DROP COLUMN balance`로 직접 정리 — 실제 배포 환경에서는 별도 마이그레이션으로 처리 필요.
+- 같은 원리로, 로컬 Postgres에 (당시 develop에는 merge되지 않은) 다른 브랜치의 해시체인 감사로그 스키마 잔재(`outbox_event.entry_hash`/`previous_hash` NOT NULL, `outbox_chain_tail` 테이블)가 남아있어 100스레드 동시성 테스트(`TransferConcurrencyTest`)가 매번 실패 — Redisson 락 문제로 오인하기 쉬운 증상이었으나 원인은 순수 로컬 스키마 drift였음. 동일하게 `ALTER TABLE ... DROP COLUMN` / 잔재 테이블 DROP으로 해결.
+
+**테스트**
+
+- 신규 8개(`LedgerEntryTest`, `AccountBalanceCalculatorTest`, `VerifyTrialBalanceServiceTest`, `TrialBalanceVerificationTaskletTest`, `OpeningBalanceMigrationServiceTest`, `TransferMoneyServiceTest`의 예약 계좌 가드 테스트 2종 포함) + 기존 `balance` API 변경에 따른 11개 파일 수정.
+- 전체 테스트(`./gradlew test`) 61개 통과, `./gradlew spotlessCheck` 통과.
+
 ## 🚧 다음 작업
 
 - 트랙 3(장애 복구 & 카오스 엔지니어링) 두 과제(Kafka DLQ, Resilience4j) 완료 — 3개 트랙(실시간 트랜잭션/EOD 배치/장애복구) 모두 핵심 구현 최소 1개 이상 완료.
 - (협업 필요) Chaos Mesh 인프라 결함 주입 — 노션 "프로젝트 개요"상 Infra(김준희) 담당 업무. 백엔드가 처음부터 CRD/클러스터까지 다 짜는 게 아니라, "어떤 장애 시나리오로 무엇(서킷 브레이커/재시도 등)을 검증할지"를 먼저 정의해 인프라 담당자와 공유하고, 실제 장애 주입 후 애플리케이션 반응을 검증하는 역할 분담으로 진행할 것
 - (보류) 실제 Kafka 브로커 기반 재시도 토픽 → DLT 라우팅 통합 테스트 (과제 11에서 범위 분리)
 - (보류) 실제 Kafka 브로커 E2E 수동 검증
-- (선택, 보류) Debezium CDC + PostgreSQL 전환
 - (보류) Testcontainers 기반 통합 테스트 재검증 — 프로젝트 전체가 docker-compose 기반 통합 테스트 컨벤션을 일관되게 쓰고 있어 현재는 도입 보류로 결정(Testcontainers는 이 컨벤션과 공존 시 일관성이 깨짐, YAGNI)
+- (권장) 실제 배포 대상 Postgres에 `accounts.balance` 컬럼 등 orphan 컬럼이 남아있다면 `ALTER TABLE ... DROP COLUMN`으로 별도 정리 필요(과제 13 참고, 이 프로젝트는 Flyway/Liquibase 미사용)
 
 ## 🤖 AI 에이전트(Claude Code) 활용 방침
 
@@ -390,7 +425,10 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 - Resilience4j 실패 판정: 어댑터가 예외를 던지는 컨벤션이면 `recordExceptions`만으로 충분하지만, boolean 등 반환값으로 성공/실패를 번역하는 컨벤션이면 `CircuitBreakerConfig.Builder.recordResult(Predicate)`로 별도 보강 필요 — 감싸인(wrapped) 예외 타입만 `recordExceptions`에 등록해야 함(원인 예외 타입을 나열해봤자 밖으로 실제로 던져지는 타입이 아니면 무의미)
 - Boot 4.0: `spring-boot-starter-aop` → `spring-boot-starter-aspectj`로 리네임(#42948), `@MockBean`/`@SpyBean` 완전 제거 → `@MockitoBean`/`@MockitoSpyBean`(`org.springframework.test.context.bean.override.mockito`) 사용
 - 이 프로젝트는 1인 개발이 아니라 Backend(본인)/Infra·SRE(김준희) 2인 협업 프로젝트임 — Chaos Mesh, K8s 클러스터 운영, GitOps/관측성 구축은 Infra 담당 영역이므로, 이런 영역을 "혼자 다 해야 하는지" 판단할 때는 먼저 노션 "프로젝트 개요"의 팀원 역할표를 확인할 것
+- Flyway/Liquibase 없이 `ddl-auto: update`만 쓰는 프로젝트에서 엔티티 필드를 제거해도 물리 컬럼은 DROP되지 않고 NOT NULL 제약만 orphan으로 남아 INSERT가 깨질 수 있음 — 로컬 DB에 이전 브랜치/이전 스키마 잔재가 없는지 항상 의심할 것(과제 13)
+- 두 값(예: DEBIT/CREDIT 쌍)의 불변식을 지키려면 "따로 만들고 나중에 검증"(validate-after)보다 "애초에 어긋난 값을 만들 수 없는 시그니처"(invariant-by-construction, 예: `LedgerEntry.transferPair`가 두 다리에 동일 `Money` 인스턴스를 강제)가 더 신뢰도 높음
+- "존재하지 않아서 우연히 막히는" 방어(예: sentinel 계좌번호가 실제 row가 없어서 조회 실패로 차단됨)는 나중에 그 전제가 깨지면 조용히 무력화되므로, 알아챈 즉시 명시적 가드 클로즈 + 전용 도메인 예외로 전환할 것(과제 13, `ReservedAccountException`)
 
 ---
 
-마지막 업데이트: 2026-08-14
+마지막 업데이트: 2026-08-15

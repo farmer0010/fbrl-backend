@@ -8,8 +8,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fbrl.application.port.in.CreateAccountUseCase;
 import com.fbrl.application.port.in.GetAccountUseCase;
+import com.fbrl.application.port.in.GetAccountUseCase.AccountDetail;
 import com.fbrl.domain.exception.AccountNotFoundException;
 import com.fbrl.domain.model.Account;
+import com.fbrl.domain.model.Money;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -50,12 +52,14 @@ class AccountControllerTest {
   @Test
   @DisplayName("존재하는 계좌번호로 조회하면 200 OK와 함께 계좌 정보를 반환한다.")
   void getAccountSuccess() throws Exception {
-    given(getAccountUseCase.getAccount("110-0001-0001")).willReturn(Account.open("110-0001-0001"));
+    given(getAccountUseCase.getAccount("110-0001-0001"))
+        .willReturn(new AccountDetail(Account.open("110-0001-0001"), Money.wons(50000)));
 
     mockMvc
         .perform(get("/api/v1/accounts/110-0001-0001"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.accountNumber").value("110-0001-0001"));
+        .andExpect(jsonPath("$.accountNumber").value("110-0001-0001"))
+        .andExpect(jsonPath("$.balance").value(50000));
   }
 
   @Test
