@@ -1,4 +1,4 @@
-// 빌드 플러그인 설정
+// build.gradle
 plugins {
 	id 'java'
 	id 'org.springframework.boot' version '4.0.7'
@@ -20,7 +20,6 @@ repositories {
 	mavenCentral()
 }
 
-// 의존성 설정
 dependencies {
 
 	// 웹, 검증, 모니터링
@@ -30,6 +29,8 @@ dependencies {
 
 	// Redis
 	implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+	implementation 'net.javacrumbs.shedlock:shedlock-spring:7.7.0'
+	implementation 'net.javacrumbs.shedlock:shedlock-provider-redis-spring:7.7.0'
 
 	// 데이터베이스 및 JPA
 	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
@@ -38,10 +39,20 @@ dependencies {
 
 	implementation 'org.redisson:redisson:3.52.0'
 
+	// kubernetes
+	implementation 'io.kubernetes:client-java:27.0.0'
+	implementation 'io.kubernetes:client-java-extended:27.0.0'
+
 	// Kafka — Boot 4.0 모듈 분리로 인해 순수 spring-kafka가 아닌 starter를 써야
 	// KafkaAutoConfiguration/KafkaProperties 자동설정 모듈까지 함께 들어온다.
 	implementation 'org.springframework.boot:spring-boot-starter-kafka'
 	testImplementation 'org.springframework.boot:spring-boot-starter-kafka-test'
+
+	implementation 'org.springframework.boot:spring-boot-starter-batch'
+	testImplementation 'org.springframework.batch:spring-batch-test'
+
+	implementation 'io.github.resilience4j:resilience4j-spring-boot4:2.4.0'
+	implementation 'org.springframework.boot:spring-boot-starter-aspectj'
 
 	// Lombok
 	compileOnly 'org.projectlombok:lombok'

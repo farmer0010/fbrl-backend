@@ -7,13 +7,16 @@ import com.fbrl.application.port.out.SaveOutboxEventPort;
 import com.fbrl.domain.model.OutboxEvent;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-@Slf4j
 @Service
 @RequiredArgsConstructor
 public class PublishPendingOutboxEventsService implements PublishPendingOutboxEventsUseCase {
+
+  private static final Logger log =
+      LoggerFactory.getLogger(PublishPendingOutboxEventsService.class);
 
   private final LoadPendingOutboxEventsPort loadPendingOutboxEventsPort;
   private final EventPublisherPort eventPublisherPort;

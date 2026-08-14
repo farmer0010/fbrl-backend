@@ -37,6 +37,12 @@ spring:
       properties:
         enable.idempotence: true
 
+  batch:
+    job:
+      enabled: false
+    jdbc:
+      initialize-schema: always
+
 logging:
   level:
     root: WARN
@@ -48,5 +54,29 @@ logging:
 
 outbox:
   polling:
-    fixed-delay-ms : 3000
+    fixed-delay-ms: 3000
     batch-size: 100
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      kafkaEventPublisher:
+        registerHealthIndicator: true
+        slidingWindowType: COUNT_BASED
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 10
+        failureRateThreshold: 50
+        waitDurationInOpenState: 30s
+        permittedNumberOfCallsInHalfOpenState: 5
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+        recordExceptions:
+          - com.fbrl.domain.exception.EventPublishException
+
+k8s:
+  leader-election:
+    enabled: false
+    namespace: default
+    lease-name: eod-settlement-leader
+    lease-duration-seconds: 15
+    renew-deadline-seconds: 10
+    retry-period-seconds: 2

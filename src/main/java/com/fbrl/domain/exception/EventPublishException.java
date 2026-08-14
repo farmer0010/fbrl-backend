@@ -1,4 +1,4 @@
-package com.fbrl.adapter.out.messaging;
+package com.fbrl.domain.exception;
 
 public class EventPublishException extends RuntimeException {
   public EventPublishException(String message, Throwable cause) {
