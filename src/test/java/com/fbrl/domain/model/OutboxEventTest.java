@@ -73,4 +73,19 @@ class OutboxEventTest {
 
     assertThat(tampered.recomputeEntryHash()).isNotEqualTo(tampered.getEntryHash());
   }
+
+  @Test
+  @DisplayName("withTraceContext()는 trace_id/span_id만 바뀌고 entryHash는 그대로 유지된다.")
+  void withTraceContext_doesNotAffectEntryHash() {
+    OutboxEvent chained =
+        OutboxEvent.create("Account", "111-111", "TRANSFER_COMPLETED", "{}")
+            .chainedWith(OutboxEvent.GENESIS_PREVIOUS_HASH);
+
+    OutboxEvent traced = chained.withTraceContext("a".repeat(32), "b".repeat(16));
+
+    assertThat(traced.getEntryHash()).isEqualTo(chained.getEntryHash());
+    assertThat(traced.recomputeEntryHash()).isEqualTo(chained.getEntryHash());
+    assertThat(traced.getTraceId()).isEqualTo("a".repeat(32));
+    assertThat(traced.getSpanId()).isEqualTo("b".repeat(16));
+  }
 }
