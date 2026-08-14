@@ -2,7 +2,7 @@
 
 ## 헥사고날 아키텍처를 선택한 이유
 
-이 프로젝트의 목적은 금융 백엔드의 신뢰성 메커니즘(분산 락, Saga, EOD 배치, 재시도/서킷 브레이커)을 검증하는 것입니다. 검증 대상인 이 메커니즘들은 인프라(DB, Kafka, Redis, K8s)와 강하게 얽히기 쉬운데, 도메인 로직(계좌 잔액 계산, Saga 상태 전이, 이자 계산)이 특정 인프라 구현에 오염되면 "무엇을 검증하는지"와 "어떻게 붙였는지"가 뒤섞여 버립니다. 헥사고날 아키텍처(Ports & Adapters)로 domain을 프레임워크 무의존 상태로 격리하면, 인프라 어댑터를 교체해도(예: MariaDB → PostgreSQL, Redisson → 다른 락 구현) 도메인 로직과 테스트는 그대로 유지됩니다.
+이 프로젝트의 목적은 금융 백엔드의 신뢰성 메커니즘(분산 락, Saga, EOD 배치, 재시도/CDC 기반 이벤트 발행)을 검증하는 것입니다. 검증 대상인 이 메커니즘들은 인프라(DB, Kafka, Redis, K8s)와 강하게 얽히기 쉬운데, 도메인 로직(계좌 잔액 계산, Saga 상태 전이, 이자 계산)이 특정 인프라 구현에 오염되면 "무엇을 검증하는지"와 "어떻게 붙였는지"가 뒤섞여 버립니다. 헥사고날 아키텍처(Ports & Adapters)로 domain을 프레임워크 무의존 상태로 격리하면, 인프라 어댑터를 교체해도(예: MariaDB → PostgreSQL, Redisson → 다른 락 구현) 도메인 로직과 테스트는 그대로 유지됩니다.
 
 **트레이드오프**
 
@@ -19,17 +19,17 @@ com.fbrl
 │   └── event        # TransferCompletedEvent
 ├── application
 │   ├── port.in       # UseCase 인터페이스 (CreateAccountUseCase, TransferMoneyUseCase, ...)
-│   ├── port.out       # Port 인터페이스 (AccountRepositoryPort, EventPublisherPort, ...)
+│   ├── port.out       # Port 인터페이스 (AccountRepositoryPort, SaveOutboxEventPort, ...)
 │   └── service        # UseCase 구현체 (CreateAccountService, TransferSagaOrchestrator, ...)
 ├── adapter
 │   ├── in
 │   │   ├── web         # AccountController, TransferMoneyController, GlobalExceptionHandler
 │   │   ├── kafka        # TransferEventConsumer, KafkaRetryTopicConfig
 │   │   ├── batch         # EodSettlementJobConfig, AccountItemReader/Processor/Writer
-│   │   └── scheduler      # EodSettlementScheduler, OutboxPollingScheduler
+│   │   └── scheduler      # EodSettlementScheduler
 │   └── out
 │       ├── persistence   # JPA 엔티티/리포지토리/매퍼/영속성 어댑터
-│       ├── messaging      # KafkaEventPublisherAdapter, KafkaProducerConfig/TopicConfig
+│       ├── messaging      # KafkaProducerConfig/TopicConfig (Retry Topic 전용, Port 미구현)
 │       ├── participant     # WithdrawalParticipantAdapter, DepositParticipantAdapter (Saga 참여자)
 │       ├── kubernetes       # KubernetesLeaderElectionAdapter
 │       └── serialization     # JacksonPayloadSerializerAdapter
@@ -84,13 +84,15 @@ com.fbrl
 
 **선택 이유**: "같은 계좌 내 이벤트 순서"보다 "다른 계좌들의 처리량"을 지키는 쪽을 선택. `KafkaRetryTopicConfig`(`src/main/java/com/fbrl/adapter/in/kafka/KafkaRetryTopicConfig.java`)에서 `maxAttempts(4)` + 지수 백오프(1s→2s→4s..., 최대 30s)로 재시도하고, `NonRetryableEventProcessingException`을 상속한 결정론적 실패(`notRetryOn` + `traversingCauses`)는 재시도 없이 즉시 DLT로 라우팅.
 
-### 5. Kafka Retry Topic과 Resilience4j 서킷 브레이커의 역할 분리
+### 5. Kafka Retry Topic과 Resilience4j 서킷 브레이커의 역할 분리 — 이후 과제 8에서 서킷 브레이커 제거됨
 
 **문제 상황**: Kafka 발행(`OutboxPollingScheduler` → `KafkaEventPublisherAdapter`)은 DB 트랜잭션 커밋 이후에 실행되는 post-commit 비동기 경로라, 실패해도 되돌릴 트랜잭션 자체가 없음. Consumer 측 재시도(4번 결정)와는 별개로 "Kafka 자체가 죽었는지"를 판단할 방법이 필요했음.
 
 **대안 비교**: 재시도만으로 대응 vs 서킷 브레이커로 장애 감지 시 시도 자체를 차단(Fail Fast).
 
-**선택 이유**: 배타적이지 않고 함께 사용. Retry Topic은 "이벤트 단위 재시도", 서킷 브레이커는 "Kafka 생사 판단 후 호출 자체를 차단"으로 역할을 나눔. `KafkaEventPublisherAdapter#publish()`(`adapter.out.messaging`)에 `@CircuitBreaker(name="kafkaEventPublisher", fallbackMethod="publishFallback")`를 적용했고, `fallbackMethod`는 실패를 삼키지 않고 항상 `EventPublishException`을 재던져 `PublishPendingOutboxEventsService`의 "실패 시 `markAsSent()` 호출 안 함" 계약을 보존.
+**선택 이유(당시)**: 배타적이지 않고 함께 사용. Retry Topic은 "이벤트 단위 재시도", 서킷 브레이커는 "Kafka 생사 판단 후 호출 자체를 차단"으로 역할을 나눔. `KafkaEventPublisherAdapter#publish()`(`adapter.out.messaging`)에 `@CircuitBreaker(name="kafkaEventPublisher", fallbackMethod="publishFallback")`를 적용했고, `fallbackMethod`는 실패를 삼키지 않고 항상 `EventPublishException`을 재던져 `PublishPendingOutboxEventsService`의 "실패 시 `markAsSent()` 호출 안 함" 계약을 보존.
+
+> 과제 8(PostgreSQL·Debezium CDC 전환)에서 Kafka 발행 자체가 애플리케이션 코드에서 사라지면서 이 문단이 설명하는 컴포넌트(`KafkaEventPublisherAdapter`, 서킷 브레이커 설정)는 모두 삭제됨. Retry Topic(4번 결정)은 Consumer 측 로직이라 그대로 유지.
 
 ### 6. 낙관적 락 예외 catch 순서
 
@@ -106,17 +108,25 @@ com.fbrl
 
 **대안 비교**: 하나의 서비스 클래스 안에서 메서드만 분리 vs 별도 스프링 빈으로 분리.
 
-**선택 이유**: 별도 빈 분리만이 실제로 동작함. `AccountCreationExecutor`(`application.service`)는 `createInNewTransaction()`을 `@Transactional(REQUIRES_NEW)`로 별도 빈에 격리했고, `DistributedLockAspect`(`global.common.aop`)는 락 획득 후 실제 트랜잭션 실행을 별도 빈인 `AopForTransaction`에 위임. `@CircuitBreaker`도 동일 원리로, `KafkaEventPublisherAdapterCircuitBreakerTest`는 어댑터를 `new`로 직접 생성하면 프록시를 거치지 않아 서킷 브레이커가 전혀 개입하지 않는다는 점을 `@SpringBootTest` + `@MockitoBean`으로 실제 프록시를 통과시켜 검증.
+**선택 이유**: 별도 빈 분리만이 실제로 동작함. `AccountCreationExecutor`(`application.service`)는 `createInNewTransaction()`을 `@Transactional(REQUIRES_NEW)`로 별도 빈에 격리했고, `DistributedLockAspect`(`global.common.aop`)는 락 획득 후 실제 트랜잭션 실행을 별도 빈인 `AopForTransaction`에 위임. `@CircuitBreaker`도 한때 동일 원리로 `KafkaEventPublisherAdapter`에 적용해 검증했으나, 과제 8(PostgreSQL·Debezium CDC 전환)에서 발행 주체 자체가 애플리케이션에서 사라지면서 함께 제거됨.
 
-### 8. PostgreSQL·Debezium CDC 전환 — 현재는 보류
+### 8. PostgreSQL 전환 및 Debezium CDC 도입 — 완료
 
 **문제 상황**: Outbox 패턴(과제 4)을 폴링 방식(`OutboxPollingScheduler`)으로 구현했는데, MariaDB보다 PostgreSQL의 논리적 복제(WAL)를 활용한 Debezium CDC가 폴링 지연/부하 없이 더 실시간에 가까운 발행이 가능함.
 
-**대안 비교**: 현재의 MariaDB + 폴링 방식 유지 vs PostgreSQL 전환 + Debezium CDC 도입.
+**대안 비교**: 기존 MariaDB + 폴링 방식 유지 vs PostgreSQL 전환 + Debezium Outbox Event Router 도입.
 
-**선택 이유(현재 상태)**: 헥사고날 구조상 `SaveOutboxEventPort`/`LoadPendingOutboxEventsPort`의 구현체(인프라 어댑터)만 교체하면 되므로 확장 과제로 남기고 보류. 현재 코드베이스는 MariaDB + 폴링 방식만 구현되어 있음.
+**선택 이유**: 헥사고날 구조상 발행 책임을 애플리케이션에서 인프라(Kafka Connect)로 완전히 이전할 수 있어, 폴링 지연·발행 실패 재시도·서킷 브레이커 등 애플리케이션이 떠안던 복잡도를 통째로 제거할 수 있음.
 
-> TODO: PostgreSQL/Debezium 전환은 실제 착수 시점에 이 문서를 갱신할 것.
+**구현 내용**:
+- `OutboxPollingScheduler`, `PublishPendingOutboxEventsUseCase`/구현체, `LoadPendingOutboxEventsPort`, `EventPublisherPort`/`KafkaEventPublisherAdapter`, `EventPublishException`, Resilience4j 서킷 브레이커 설정을 모두 삭제 — 발행 주체가 앱에서 Debezium으로 완전히 이전되어 더 이상 존재 이유가 없는 컴포넌트들.
+- `OutboxEvent`는 발행 확인 상태(`Status` enum, `markAsSent()`/`markAsFailed()`)를 제거하고 append-only 로그로 전환 — 전환 후에는 이 상태를 바꾸는 코드가 하나도 남지 않기 때문.
+- `outbox_event.payload` 컬럼은 `@Lob` 매핑 시 PostgreSQL에서 `oid`(Large Object) 타입으로 생성되어 논리적 복제로 본문을 캡처할 수 없었음(커넥터를 직접 붙여 검증하다 발견) — `@Column(columnDefinition = "text")`로 변경해 해결.
+- Debezium Outbox Event Router는 `route.by.field`/`table.field.event.*` 커넥터 설정으로 `aggregate_type`/`aggregate_id`/`event_type`/`payload` 컬럼명을 그대로 매핑 — 엔티티/DB 스키마 변경 없이 인프라 설정만으로 해결(`debezium/outbox-connector.json`).
+- `route.topic.replacement`를 고정값 `transfer-events`로 오버라이드해 기존 `TransferEventConsumer`/Retry Topic 설정을 전혀 건드리지 않음.
+- `table.field.event.timestamp`는 사용하지 않음 — `created_at`이 `timestamptz`(Debezium 표현상 STRING)라 이 필드가 요구하는 INT64와 맞지 않아 커넥터가 즉시 실패하는 것을 직접 확인함. 대신 Debezium이 소스 커밋 시각을 자동으로 사용.
+- REPLICA IDENTITY는 별도 설정 없이 기본값(PK 기반)으로 충분 — Event Router는 INSERT만 라우팅하므로 UPDATE/DELETE의 이전 값이 필요 없음.
+- 커넥터 등록 후 실제 INSERT → `transfer-events` 토픽 수신까지 로컬에서 직접 검증 완료.
 
 ---
 
