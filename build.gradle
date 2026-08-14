@@ -1,4 +1,4 @@
-// 빌드 플러그인 설정
+// build.gradle
 plugins {
 	id 'java'
 	id 'org.springframework.boot' version '4.0.7'
@@ -20,7 +20,6 @@ repositories {
 	mavenCentral()
 }
 
-// 의존성 설정
 dependencies {
 
 	// 웹, 검증, 모니터링
@@ -49,6 +48,12 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-kafka'
 	testImplementation 'org.springframework.boot:spring-boot-starter-kafka-test'
 
+	implementation 'org.springframework.boot:spring-boot-starter-batch'
+	testImplementation 'org.springframework.batch:spring-batch-test'
+
+	implementation 'io.github.resilience4j:resilience4j-spring-boot4:2.4.0'
+	implementation 'org.springframework.boot:spring-boot-starter-aspectj'
+
 	// Lombok
 	compileOnly 'org.projectlombok:lombok'
 	annotationProcessor 'org.projectlombok:lombok'
@@ -64,9 +69,6 @@ dependencies {
 	// Lombok 테스트 환경
 	testCompileOnly 'org.projectlombok:lombok'
 	testAnnotationProcessor 'org.projectlombok:lombok'
-
-	implementation 'org.springframework.boot:spring-boot-starter-batch'
-	testImplementation 'org.springframework.batch:spring-batch-test'
 }
 
 // 코드 포맷팅 설정
