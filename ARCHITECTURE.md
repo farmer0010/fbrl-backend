@@ -151,6 +151,22 @@ com.fbrl
 - 실제로 앱을 띄워 송금 2건 후 검증 API가 `valid=true`를 반환하는 것과, DB에서 직접 `payload`를 변조한 뒤 `entryHash` 불일치로 정확한 `id`에서 감지되는 것까지 직접 확인함.
 - Debezium 커넥터(`debezium/outbox-connector.json`)는 변경 없음 — 매핑 대상 컬럼(`aggregate_type`/`aggregate_id`/`event_type`/`payload`)이 그대로라 새 컬럼(`previous_hash`, `entry_hash`)은 CDC 라우팅에 영향 없음.
 
+### 10. Account.balance를 LedgerEntry 기반 파생값으로 전환 (복식부기 원장) — 완료
+
+**문제 상황**: `Account.balance`가 이체마다 직접 +/- 되는 저장 필드(read-modify-write)였음. 잔액 정합성을 "언제든 자체 검증 가능한" 형태로 만들려면 append-only INSERT만으로 잔액이 결정되어야 하는데, 저장 필드 방식은 그 자체로는 자기 정합성을 증명할 수 없음(값이 맞는지 별도 검증 로직 없이는 알 수 없음).
+
+**대안 비교**: (1) 잔액 계산 시점 — 매 조회마다 전체 `LedgerEntry` 합산 vs 캐시 필드 유지 + 사후 검증 vs 앵커(EodSnapshot)+델타 하이브리드. (2) 잔액 부족 검증의 동시성 제어 — 기존 Redisson 분산 락 재사용 vs DB CHECK 제약 추가. (3) 기존 balance 마이그레이션 — 즉시 제거 vs opening-balance `LedgerEntry` 시딩 후 제거. (4) 대차평형 검증 시점 — 매 이체 후 즉시 전체 스캔 vs EOD 배치 vs 거래 단위 구조적 보장 + 시스템 전체는 배치.
+
+**선택 이유**: 앵커+델타 하이브리드는 스캔 범위를 "최대 하루치"로 bounded시키면서도 캐시 이원화(SSOT 붕괴)를 피함. DB CHECK 제약은 잔액이 SUM 파생값이 되는 순간 집계 제약이라 순수 CHECK로 표현 불가(트리거로 우회하면 매 이체마다 전체 스캔이 재발해 append-only 목표와 정면 충돌)라 기각하고 기존 Redisson 락 안에서 애플리케이션 레벨로 검증. opening-balance 시딩은 상대계정(`SystemAccounts.OPENING_BALANCE_SOURCE`) 없이 단일 다리로 넣으면 시스템 전체 대차평형이 영구히 깨지므로, 기존 `LedgerEntry.transferPair`를 재사용해 페어로 시딩. 대차평형은 거래 단위(두 다리 합=0)는 `transferPair`의 시그니처 자체로 구조적 보장(invariant-by-construction)하고, 시스템 전체 합=0은 매 이체마다 전체 스캔할 필요 없이 EOD 배치에서 저빈도로 검증.
+
+**구현 내용**:
+- `LedgerEntry`(`domain.model`, record) — accountNumber/direction(DEBIT/CREDIT)/amount(`Money`)/transactionId/occurredAt, `@Version` 없음(불변·append-only). `transferPair(from, to, amount, txId, at)`가 두 다리에 동일 `amount` 인스턴스를 재사용해 합이 0이 아닌 쌍 자체를 생성 불가능하게 만듦.
+- `Account.balance` 저장 필드/`deposit()`/`withdraw()` 제거 → 순수 함수 `calculateBalance(anchorBalance, entriesSinceAnchor)`로 전환(포트 의존 없이 도메인 순수성 유지). 앵커(`EodSnapshot.totalBalance()`) + 델타(`LedgerEntry` since 앵커 `computedAt`) 조회·조합은 application 계층의 `AccountBalanceCalculator`가 전담 — port.in으로 노출하지 않고 `AccountCreationExecutor`와 동일하게 여러 서비스가 재사용하는 내부 헬퍼로 위치.
+- 시스템 전체 대차평형 검증은 `VerifyTrialBalanceUseCase`/`VerifyTrialBalanceService`(port.in에 검증 결과 record를 중첩시키는 컨벤션)로 구현, `EodSettlementJobConfig`의 `eodSettlementJob`에 `trialBalanceVerificationStep`(Tasklet)으로 연결 — 불일치 시 `TrialBalanceViolationException`으로 배치 스텝 실패.
+- 예약 계좌 보호: 계좌 미존재로 "우연히" 막히던 `SystemAccounts.OPENING_BALANCE_SOURCE` 이체 시도를 `TransferMoneyService`에서 `assertNotReservedAccount` 가드로 명시화하고 `ReservedAccountException`을 던지도록 전환 — 나중에 그 계좌번호로 실제 Account row가 생기더라도 방어가 유지됨.
+- `LockComparisonService`(비관적/낙관적/Redisson 3종 락 벤치마크, 과제 1-2)는 `balance` 컬럼 제거로 전제가 깨져 락 비교 대상을 `AccountLockAnchorJpaEntity`(도메인 매핑 없는 인프라 전용 엔티티)로 교체 — 벤치마크 목적은 유지, 실제 이체 경로 동시성 제어는 여전히 Redisson 분산 락 단독.
+- Flyway/Liquibase 미사용(`ddl-auto: update`) 환경이라 `balance` 컬럼 제거는 애플리케이션 매핑 차원의 변경일 뿐 물리 컬럼은 자동 DROP되지 않음 — 실제 배포 시 별도 `ALTER TABLE ... DROP COLUMN` 마이그레이션 필요.
+
 ---
 
 각 결정의 배경/트러블슈팅 전체 기록은 [`PROGRESS.md`](./PROGRESS.md)를 참고하세요.

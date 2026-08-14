@@ -2,6 +2,7 @@ package com.fbrl.adapter.out.persistence;
 
 import jakarta.persistence.*;
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 
 @Entity
@@ -29,6 +30,9 @@ public class EodSnapshotJpaEntity {
   @Column(name = "settlement_date", nullable = false)
   private LocalDate settlementDate;
 
+  @Column(name = "computed_at", nullable = false)
+  private Instant computedAt;
+
   protected EodSnapshotJpaEntity() {}
 
   public EodSnapshotJpaEntity(
@@ -36,12 +40,14 @@ public class EodSnapshotJpaEntity {
       String accountNumber,
       BigDecimal closingBalance,
       BigDecimal interestAmount,
-      LocalDate settlementDate) {
+      LocalDate settlementDate,
+      Instant computedAt) {
     this.id = id;
     this.accountNumber = accountNumber;
     this.closingBalance = closingBalance;
     this.interestAmount = interestAmount;
     this.settlementDate = settlementDate;
+    this.computedAt = computedAt;
   }
 
   public Long getId() {
@@ -62,5 +68,9 @@ public class EodSnapshotJpaEntity {
 
   public LocalDate getSettlementDate() {
     return settlementDate;
+  }
+
+  public Instant getComputedAt() {
+    return computedAt;
   }
 }
