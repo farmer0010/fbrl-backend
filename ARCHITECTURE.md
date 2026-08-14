@@ -18,12 +18,12 @@ com.fbrl
 │   ├── exception    # 도메인 전용 예외 (프레임워크 예외 번역 대상)
 │   └── event        # TransferCompletedEvent
 ├── application
-│   ├── port.in       # UseCase 인터페이스 (CreateAccountUseCase, TransferMoneyUseCase, ...)
-│   ├── port.out       # Port 인터페이스 (AccountRepositoryPort, SaveOutboxEventPort, ...)
-│   └── service        # UseCase 구현체 (CreateAccountService, TransferSagaOrchestrator, ...)
+│   ├── port.in       # UseCase 인터페이스 (CreateAccountUseCase, TransferMoneyUseCase, VerifyAuditChainUseCase, ...)
+│   ├── port.out       # Port 인터페이스 (AccountRepositoryPort, SaveOutboxEventPort, LoadAllOutboxEventsPort, ...)
+│   └── service        # UseCase 구현체 (CreateAccountService, TransferSagaOrchestrator, VerifyAuditChainService, ...)
 ├── adapter
 │   ├── in
-│   │   ├── web         # AccountController, TransferMoneyController, GlobalExceptionHandler
+│   │   ├── web         # AccountController, TransferMoneyController, AuditController, GlobalExceptionHandler
 │   │   ├── kafka        # TransferEventConsumer, KafkaRetryTopicConfig
 │   │   ├── batch         # EodSettlementJobConfig, AccountItemReader/Processor/Writer
 │   │   └── scheduler      # EodSettlementScheduler
@@ -127,6 +127,29 @@ com.fbrl
 - `table.field.event.timestamp`는 사용하지 않음 — `created_at`이 `timestamptz`(Debezium 표현상 STRING)라 이 필드가 요구하는 INT64와 맞지 않아 커넥터가 즉시 실패하는 것을 직접 확인함. 대신 Debezium이 소스 커밋 시각을 자동으로 사용.
 - REPLICA IDENTITY는 별도 설정 없이 기본값(PK 기반)으로 충분 — Event Router는 INSERT만 라우팅하므로 UPDATE/DELETE의 이전 값이 필요 없음.
 - 커넥터 등록 후 실제 INSERT → `transfer-events` 토픽 수신까지 로컬에서 직접 검증 완료.
+
+### 9. Outbox 해시체인 기반 불변 감사로그
+
+**문제 상황**: `OutboxEvent`는 과제 8에서 append-only 로그로 전환됐지만, "누구도 사후에 내용을 조용히 고칠 수 없다"는 보장까지는 없었음. 감사로그로서 신뢰받으려면 항목 하나라도 변조되면 반드시 감지할 수 있어야 함.
+
+**동시성 제어 대안 비교**: 여러 트랜잭션이 동시에 `OutboxEvent`를 저장할 수 있는데(예: 서로 다른 계좌쌍이 동시에 송금), "직전 해시 조회 → 다음 해시 계산" 구간에 직렬화가 없으면 체인이 갈라지거나 두 항목이 같은 `previousHash`를 참조하며 동시에 커밋될 수 있음.
+
+| 옵션 | 처리량 영향 | 구현 복잡도 | 장애 결합도 |
+|---|---|---|---|
+| a) Redisson 분산 락(전용 키) | 모든 저장이 이 락 하나에서 경합(기존 계좌별 락과 별개로 추가) | 중간 — 기존 `@DistributedLock`/`AopForTransaction` 패턴 재사용 가능 | Redis 장애 시 감사로그 기록 자체가 막힘 |
+| **b) `outbox_chain_tail` 단일 행 + `SELECT ... FOR UPDATE`** | 마찬가지로 전역 경합이지만 Redis 왕복 없이 같은 트랜잭션 내에서 처리 | 낮음 — 이미 열려있는 REQUIRES_NEW 트랜잭션 안에 자연스럽게 포함 | 없음 — PostgreSQL 하나로 완결 |
+| c) `aggregateType`별 체인 분리 | 이론상 유리하나 현재 `aggregateType`이 `"Account"` 하나뿐이라 오늘 기준 효과 없음 | 낮음 | 없음, 다만 "전역 무결성"이 "타입별 무결성"으로 약화됨 |
+
+**선택 이유**: b) 채택(사용자 확인 후 진행). `outbox_event` 테이블의 "마지막 행"에 직접 `FOR UPDATE`를 거는 방식은 두 트랜잭션이 같은 "현재 최댓값" 행을 각각 조회해 잠그려는 팬텀 위험이 있어, 전용 단일 행 tail-pointer 테이블(`outbox_chain_tail`)이 필요함. 이미 outbox insert가 `AopForTransaction`이 연 REQUIRES_NEW 트랜잭션 안에서 일어나므로, 별도 시스템(Redis) 없이 같은 DB 트랜잭션에 원자적으로 편입 가능.
+
+**구현 내용**:
+- `OutboxEvent`(`domain.model`)에 `previousHash`/`entryHash` 필드 추가. 해시는 Jackson 직렬화 대신 `(aggregateType, aggregateId, eventType, payload, createdAt.toString(), previousHash)`를 `"|"`로 명시적으로 이어붙여 SHA-256으로 계산(`recomputeEntryHash()`) — 라이브러리 버전에 따라 직렬화 포맷이 달라지면 검증 재현성이 깨지기 때문. `id`는 DB IDENTITY라 해시 계산 시점(insert 이전)엔 알 수 없어 해시 입력에서 의도적으로 제외.
+- 제네시스(체인 첫 항목)의 `previousHash`는 `null` 대신 64자리 `"0"` 문자열 상수(`OutboxEvent.GENESIS_PREVIOUS_HASH`)로 표현 — DB 컬럼을 NOT NULL로 유지하고, 검증 로직에서 "null이면 특별 취급"하는 분기를 없애기 위함.
+- `OutboxPersistenceAdapter.save()`(`adapter.out.persistence`)가 저장 시 `outbox_chain_tail`을 `SELECT ... FOR UPDATE`로 잠그고 `previousHash`를 확정한 뒤 insert, 커밋 시점에 tail을 갱신. 최초 기동 시 tail 행이 없는 부트스트랩 경합은 `INSERT ... ON CONFLICT DO NOTHING`으로 제거(항상 로우가 있는 상태를 보장한 뒤 잠금).
+- `VerifyAuditChainUseCase`/`VerifyAuditChainService`(`application`)와 `GET /api/v1/audit/verify`(`adapter.in.web.AuditController`) 추가 — 전체 체인을 id 오름차순으로 순회하며 `previousHash` 연결과 `entryHash` 재계산 일치 여부를 검증하고, 불일치 시 끊어진 `id`와 사유를 반환.
+- `OutboxChainConcurrencyTest`로 서로 다른 계좌쌍 50건 동시 송금(기존 계좌별 Redisson 락으로는 서로 경합하지 않도록 의도적으로 분리) 시 체인이 갈라지지 않고 정확히 이어짐을 검증(entryHash/previousHash 각 50개 모두 유일).
+- 실제로 앱을 띄워 송금 2건 후 검증 API가 `valid=true`를 반환하는 것과, DB에서 직접 `payload`를 변조한 뒤 `entryHash` 불일치로 정확한 `id`에서 감지되는 것까지 직접 확인함.
+- Debezium 커넥터(`debezium/outbox-connector.json`)는 변경 없음 — 매핑 대상 컬럼(`aggregate_type`/`aggregate_id`/`event_type`/`payload`)이 그대로라 새 컬럼(`previous_hash`, `entry_hash`)은 CDC 라우팅에 영향 없음.
 
 ---
 

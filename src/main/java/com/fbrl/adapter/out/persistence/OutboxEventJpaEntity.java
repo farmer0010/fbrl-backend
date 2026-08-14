@@ -36,13 +36,21 @@ public class OutboxEventJpaEntity {
   @Column(name = "created_at", nullable = false)
   private Instant createdAt;
 
+  @Column(name = "previous_hash", nullable = false, length = 64)
+  private String previousHash;
+
+  @Column(name = "entry_hash", nullable = false, length = 64, unique = true)
+  private String entryHash;
+
   private OutboxEventJpaEntity(
       Long id,
       String aggregateType,
       String aggregateId,
       String eventType,
       String payload,
-      Instant createdAt) {
+      Instant createdAt,
+      String previousHash,
+      String entryHash) {
 
     this.id = id;
     this.aggregateType = aggregateType;
@@ -50,6 +58,8 @@ public class OutboxEventJpaEntity {
     this.eventType = eventType;
     this.payload = payload;
     this.createdAt = createdAt;
+    this.previousHash = previousHash;
+    this.entryHash = entryHash;
   }
 
   static OutboxEventJpaEntity fromDomain(OutboxEvent outboxEvent) {
@@ -59,10 +69,13 @@ public class OutboxEventJpaEntity {
         outboxEvent.getAggregateId(),
         outboxEvent.getEventType(),
         outboxEvent.getPayload(),
-        outboxEvent.getCreatedAt());
+        outboxEvent.getCreatedAt(),
+        outboxEvent.getPreviousHash(),
+        outboxEvent.getEntryHash());
   }
 
   OutboxEvent toDomain() {
-    return new OutboxEvent(id, aggregateType, aggregateId, eventType, payload, createdAt);
+    return new OutboxEvent(
+        id, aggregateType, aggregateId, eventType, payload, createdAt, previousHash, entryHash);
   }
 }
