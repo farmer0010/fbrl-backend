@@ -1,6 +1,6 @@
 # FBRL (Financial Backend Reliability Lab)
 
-금융 거래의 **신뢰성**, **분산 동시성 제어**, **장애 복구 메커니즘**을 직접 구현하고 검증하기 위한 백엔드 실험 플랫폼입니다. 실제 서비스가 아니라, 분산 락·Saga·EOD 배치·Kafka 재시도/서킷 브레이커 등 금융 백엔드에서 요구되는 신뢰성 패턴을 헥사고날 아키텍처 위에서 검증하는 것이 목적입니다.
+금융 거래의 **신뢰성**, **분산 동시성 제어**, **장애 복구 메커니즘**을 직접 구현하고 검증하기 위한 백엔드 실험 플랫폼입니다. 실제 서비스가 아니라, 분산 락·Saga·EOD 배치·Kafka 재시도/CDC 기반 이벤트 발행 등 금융 백엔드에서 요구되는 신뢰성 패턴을 헥사고날 아키텍처 위에서 검증하는 것이 목적입니다.
 
 ## 기술 스택
 
@@ -9,12 +9,12 @@
 | Language | Java 17 |
 | Framework | Spring Boot 4.0.7 |
 | Architecture | 헥사고날 아키텍처 (Ports & Adapters) |
-| Database | MariaDB 11.2 (현재 테스트 기준) / PostgreSQL 전환 검토 중 |
+| Database | PostgreSQL 16 (wal_level=logical) |
 | Cache / 분산 락 | Redis 7.2, Redisson |
 | Messaging | Apache Kafka 3.9.0 (KRaft) |
+| CDC | Debezium 3.0.0.Final + Kafka Connect (PostgreSQL 논리적 복제 기반 Outbox Event Router) |
 | Batch | Spring Batch 6.0.4 |
 | 분산 스케줄링 | ShedLock 7.7.0, Kubernetes Lease API (client-java 27.0.0) |
-| 복원력 | Resilience4j (resilience4j-spring-boot4 2.4.0) |
 | Build | Gradle |
 
 ## 아키텍처
@@ -27,7 +27,7 @@ graph TB
         WEB["web<br/>(AccountController, TransferMoneyController)"]
         KAFKA_IN["kafka<br/>(TransferEventConsumer)"]
         BATCH["batch<br/>(EodSettlementJobConfig)"]
-        SCHED["scheduler<br/>(EodSettlementScheduler, OutboxPollingScheduler)"]
+        SCHED["scheduler<br/>(EodSettlementScheduler)"]
     end
 
     subgraph application["application — 유스케이스"]
@@ -44,9 +44,13 @@ graph TB
 
     subgraph adapter_out["adapter.out — 출력 어댑터"]
         PERSIST["persistence<br/>(JPA 엔티티/리포지토리/매퍼)"]
-        MSG["messaging<br/>(Kafka Producer)"]
+        MSG["messaging<br/>(Kafka Producer, Retry Topic 전용)"]
         PARTICIPANT["participant<br/>(Saga 참여자)"]
         K8S["kubernetes<br/>(LeaderElection)"]
+    end
+
+    subgraph external_infra["앱 프로세스 밖 — 인프라"]
+        CDC["Kafka Connect + Debezium<br/>(Outbox Event Router)"]
     end
 
     WEB --> PORT_IN
@@ -59,13 +63,14 @@ graph TB
     SERVICE --> PORT_OUT
 
     PORT_OUT -.구현.-> PERSIST
-    PORT_OUT -.구현.-> MSG
     PORT_OUT -.구현.-> PARTICIPANT
     PORT_OUT -.구현.-> K8S
 
     PERSIST --> MODEL
-    MSG --> MODEL
     PARTICIPANT --> MODEL
+
+    PERSIST -. "WAL(논리적 복제)" .-> CDC
+    CDC -- "transfer-events" --> KAFKA_IN
 ```
 
 ## 3개 트랙별 핵심 기능
@@ -73,7 +78,7 @@ graph TB
 ### 트랙 1 — 실시간 트랜잭션 & 분산 동시성 제어
 - Redisson 분산 락 (`@DistributedLock` AOP, REQUIRES_NEW 트랜잭션 분리)
 - API 멱등성 (Redis SETNX 기반 `@CheckIdempotency`)
-- Transactional Outbox 패턴 + Outbox Polling Publisher (Kafka 발행)
+- Transactional Outbox 패턴 + Debezium CDC 기반 발행 (PostgreSQL 논리적 복제, 폴링 없이 WAL 기반으로 실시간에 가깝게 Kafka 발행)
 - Saga 오케스트레이션 (`TransferSaga` 상태 머신 + 보상 트랜잭션, Choreography 대신 Orchestration 채택)
 
 ### 트랙 2 — EOD 대규모 정산 배치
@@ -83,15 +88,17 @@ graph TB
 
 ### 트랙 3 — 장애 복구 & 복원력
 - Kafka Consumer Non-blocking Retry Topic + DLT (결정론적 실패는 즉시 DLT로, 일시적 실패는 지수 백오프 재시도)
-- Resilience4j 서킷 브레이커 (Kafka 이벤트 발행 경로 보호, Retry Topic과 역할 분리)
 - Chaos Mesh 기반 결함 주입은 **Infra 담당(김준희) 영역**이며 이 리포지토리의 범위 밖입니다. 백엔드는 "어떤 장애 시나리오로 무엇을 검증할지" 정의와 장애 주입 후 애플리케이션 반응 검증을 담당합니다.
 
 ## 로컬 실행 방법
 
-의존 인프라(MariaDB, Redis, Kafka)는 `docker-compose.yml`로 기동합니다.
+의존 인프라(PostgreSQL, Redis, Kafka, Kafka Connect)는 `docker-compose.yml`로 기동합니다. Debezium 커넥터는 Kafka Connect REST API로 별도 등록해야 합니다.
 
 ```bash
 docker compose up -d
+curl -X POST -H "Content-Type: application/json" \
+  --data @debezium/outbox-connector.json \
+  http://localhost:8083/connectors
 ./gradlew bootRun
 ```
 

@@ -1,16 +1,16 @@
 services:
-  mariadb:
-    image: mariadb:11.2
-    container_name: fbrl-mariadb
+  postgres:
+    image: postgres:16
+    container_name: fbrl-postgres
     ports:
-      - "3306:3306"
+      - "5432:5432"
     environment:
-      MARIADB_ROOT_PASSWORD: rootpassword
-      MARIADB_DATABASE: fbrl_db
-      MARIADB_USER: fbrl_user
-      MARIADB_PASSWORD: fbrlpassword
+      POSTGRES_DB: fbrl_db
+      POSTGRES_USER: fbrl_user
+      POSTGRES_PASSWORD: fbrlpassword
+    command: ["postgres", "-c", "wal_level=logical"]
     volumes:
-      - mariadb_data:/var/lib/mysql
+      - postgres_data:/var/lib/postgresql/data
     restart: always
 
   redis:
@@ -48,6 +48,24 @@ services:
       start_period: 30s
     restart: always
 
+  kafka-connect:
+    image: debezium/connect:3.0.0.Final
+    container_name: fbrl-kafka-connect
+    ports:
+      - "8083:8083"
+    environment:
+      BOOTSTRAP_SERVERS: kafka:19092
+      GROUP_ID: fbrl-connect-cluster
+      CONFIG_STORAGE_TOPIC: fbrl_connect_configs
+      OFFSET_STORAGE_TOPIC: fbrl_connect_offsets
+      STATUS_STORAGE_TOPIC: fbrl_connect_statuses
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_started
+    restart: always
+
 volumes:
-  mariadb_data:
+  postgres_data:
   kafka_data:
