@@ -48,6 +48,24 @@ services:
       start_period: 30s
     restart: always
 
+  kafka-connect:
+    image: debezium/connect:3.0.0.Final
+    container_name: fbrl-kafka-connect
+    ports:
+      - "8083:8083"
+    environment:
+      BOOTSTRAP_SERVERS: kafka:19092
+      GROUP_ID: fbrl-connect-cluster
+      CONFIG_STORAGE_TOPIC: fbrl_connect_configs
+      OFFSET_STORAGE_TOPIC: fbrl_connect_offsets
+      STATUS_STORAGE_TOPIC: fbrl_connect_statuses
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_started
+    restart: always
+
 volumes:
   postgres_data:
   kafka_data:
