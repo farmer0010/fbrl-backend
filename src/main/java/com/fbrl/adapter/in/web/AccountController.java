@@ -3,7 +3,9 @@ package com.fbrl.adapter.in.web;
 import com.fbrl.adapter.in.web.dto.AccountResponse;
 import com.fbrl.application.port.in.CreateAccountUseCase;
 import com.fbrl.application.port.in.GetAccountUseCase;
+import com.fbrl.application.port.in.GetAccountUseCase.AccountDetail;
 import com.fbrl.domain.model.Account;
+import com.fbrl.domain.model.Money;
 import java.net.URI;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -24,12 +26,12 @@ public class AccountController {
   public ResponseEntity<AccountResponse> createAccount() {
     Account account = createAccountUseCase.createAccount();
     return ResponseEntity.created(URI.create("/api/v1/accounts/" + account.getAccountNumber()))
-        .body(AccountResponse.from(account));
+        .body(AccountResponse.from(account, Money.ZERO));
   }
 
   @GetMapping("/{accountNumber}")
   public ResponseEntity<AccountResponse> getAccount(@PathVariable String accountNumber) {
-    Account account = getAccountUseCase.getAccount(accountNumber);
-    return ResponseEntity.ok(AccountResponse.from(account));
+    AccountDetail detail = getAccountUseCase.getAccount(accountNumber);
+    return ResponseEntity.ok(AccountResponse.from(detail.account(), detail.balance()));
   }
 }

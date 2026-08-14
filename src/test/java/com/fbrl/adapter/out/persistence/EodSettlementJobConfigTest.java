@@ -2,9 +2,12 @@ package com.fbrl.adapter.out.persistence;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fbrl.application.port.out.SaveLedgerEntryPort;
 import com.fbrl.domain.model.Account;
+import com.fbrl.domain.model.LedgerEntry;
 import com.fbrl.domain.model.Money;
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -31,19 +34,29 @@ class EodSettlementJobConfigTest {
   @Autowired private AccountJpaRepository accountJpaRepository;
   @Autowired private AccountPersistenceAdapter accountPersistenceAdapter;
   @Autowired private EodSnapshotJpaRepository eodSnapshotJpaRepository;
+  @Autowired private LedgerEntryPersistenceAdapter ledgerEntryPersistenceAdapter;
+  @Autowired private SaveLedgerEntryPort saveLedgerEntryPort;
 
   @BeforeEach
   void setUp() {
+    ledgerEntryPersistenceAdapter.deleteAllInBatch();
     accountJpaRepository.deleteAllInBatch();
     eodSnapshotJpaRepository.deleteAllInBatch();
     jobRepositoryTestUtils.removeJobExecutions();
 
     jobOperatorTestUtils.setJob(eodSettlementJob);
 
-    accountPersistenceAdapter.save(
-        Account.create("111-111", Money.of(BigDecimal.valueOf(1_000_000))));
-    accountPersistenceAdapter.save(
-        Account.create("222-222", Money.of(BigDecimal.valueOf(2_000_000))));
+    accountPersistenceAdapter.save(Account.create("111-111"));
+    accountPersistenceAdapter.save(Account.create("222-222"));
+
+    saveLedgerEntryPort.saveAll(
+        LedgerEntry.transferPair(
+                "TEST-SEED-SOURCE", "111-111", Money.wons(1_000_000), "TEST_SEED", Instant.now())
+            .entries());
+    saveLedgerEntryPort.saveAll(
+        LedgerEntry.transferPair(
+                "TEST-SEED-SOURCE", "222-222", Money.wons(2_000_000), "TEST_SEED", Instant.now())
+            .entries());
   }
 
   @Test
