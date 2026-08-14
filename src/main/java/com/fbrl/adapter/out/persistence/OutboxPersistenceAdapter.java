@@ -3,6 +3,8 @@ package com.fbrl.adapter.out.persistence;
 import com.fbrl.application.port.out.LoadAllOutboxEventsPort;
 import com.fbrl.application.port.out.SaveOutboxEventPort;
 import com.fbrl.domain.model.OutboxEvent;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -10,18 +12,36 @@ import org.springframework.stereotype.Component;
 @Component
 @RequiredArgsConstructor
 public class OutboxPersistenceAdapter implements SaveOutboxEventPort, LoadAllOutboxEventsPort {
+  private static final String SPAN_NAME = "outbox.save";
+
   private final OutboxEventJpaRepository outboxEventJpaRepository;
   private final OutboxChainTailJpaRepository outboxChainTailJpaRepository;
+  private final Tracer tracer;
 
   @Override
   public OutboxEvent save(OutboxEvent outboxEvent) {
+    Span span = tracer.nextSpan().name(SPAN_NAME).start();
+    try (Tracer.SpanInScope ignored = tracer.withSpan(span)) {
+      return doSave(outboxEvent, span);
+    } catch (RuntimeException e) {
+      span.error(e);
+      throw e;
+    } finally {
+      span.end();
+    }
+  }
+
+  private OutboxEvent doSave(OutboxEvent outboxEvent, Span span) {
     outboxChainTailJpaRepository.ensureInitialized(OutboxEvent.GENESIS_PREVIOUS_HASH);
     OutboxChainTailJpaEntity tail =
         outboxChainTailJpaRepository
             .findForUpdate()
             .orElseThrow(() -> new IllegalStateException("outbox_chain_tail 초기화에 실패했습니다."));
 
-    OutboxEvent chainedEvent = outboxEvent.chainedWith(tail.getLatestEntryHash());
+    OutboxEvent chainedEvent =
+        outboxEvent
+            .chainedWith(tail.getLatestEntryHash())
+            .withTraceContext(span.context().traceId(), span.context().spanId());
 
     OutboxEventJpaEntity entity = OutboxEventJpaEntity.fromDomain(chainedEvent);
     OutboxEventJpaEntity savedEntity = outboxEventJpaRepository.save(entity);
