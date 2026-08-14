@@ -3,10 +3,16 @@ package com.fbrl.application.service;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fbrl.adapter.out.persistence.AccountPersistenceAdapter;
+import com.fbrl.adapter.out.persistence.EodSnapshotPersistenceAdapter;
+import com.fbrl.adapter.out.persistence.LedgerEntryPersistenceAdapter;
 import com.fbrl.application.port.in.TransferMoneyCommand;
+import com.fbrl.application.port.out.SaveLedgerEntryPort;
 import com.fbrl.domain.model.Account;
+import com.fbrl.domain.model.LedgerDirection;
+import com.fbrl.domain.model.LedgerEntry;
 import com.fbrl.domain.model.Money;
-import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -24,18 +30,34 @@ class TransferConcurrencyTest {
 
   @Autowired private AccountPersistenceAdapter accountPersistenceAdapter;
 
+  @Autowired private LedgerEntryPersistenceAdapter ledgerEntryPersistenceAdapter;
+
+  @Autowired private EodSnapshotPersistenceAdapter eodSnapshotPersistenceAdapter;
+
+  @Autowired private SaveLedgerEntryPort saveLedgerEntryPort;
+
+  @Autowired private AccountBalanceCalculator accountBalanceCalculator;
+
   private final String SENDER_ACCOUNT_NUMBER = "111-111";
   private final String RECEIVER_ACCOUNT_NUMBER = "222-222";
 
   @BeforeEach
   void setUp() {
+    ledgerEntryPersistenceAdapter.deleteAllInBatch();
+    eodSnapshotPersistenceAdapter.deleteAllInBatch();
     accountPersistenceAdapter.deleteAllInBatch();
 
-    accountPersistenceAdapter.save(
-        Account.create(SENDER_ACCOUNT_NUMBER, Money.of(BigDecimal.valueOf(1_000_000))));
+    accountPersistenceAdapter.save(Account.create(SENDER_ACCOUNT_NUMBER));
+    accountPersistenceAdapter.save(Account.create(RECEIVER_ACCOUNT_NUMBER));
 
-    accountPersistenceAdapter.save(
-        Account.create(RECEIVER_ACCOUNT_NUMBER, Money.of(BigDecimal.ZERO)));
+    saveLedgerEntryPort.saveAll(
+        List.of(
+            LedgerEntry.of(
+                SENDER_ACCOUNT_NUMBER,
+                LedgerDirection.CREDIT,
+                Money.wons(1_000_000),
+                "TEST_SEED",
+                Instant.now())));
   }
 
   @Test
@@ -50,7 +72,7 @@ class TransferConcurrencyTest {
 
     TransferMoneyCommand command =
         new TransferMoneyCommand(
-            SENDER_ACCOUNT_NUMBER, RECEIVER_ACCOUNT_NUMBER, Money.of(BigDecimal.valueOf(10_000)));
+            SENDER_ACCOUNT_NUMBER, RECEIVER_ACCOUNT_NUMBER, Money.wons(10_000));
 
     for (int i = 0; i < threadCount; i++) {
       executorService.submit(
@@ -65,14 +87,11 @@ class TransferConcurrencyTest {
 
     latch.await();
 
-    Account sender =
-        accountPersistenceAdapter.findByAccountNumber(SENDER_ACCOUNT_NUMBER).orElseThrow();
+    Money senderBalance = accountBalanceCalculator.calculate(Account.create(SENDER_ACCOUNT_NUMBER));
+    Money receiverBalance =
+        accountBalanceCalculator.calculate(Account.create(RECEIVER_ACCOUNT_NUMBER));
 
-    Account receiver =
-        accountPersistenceAdapter.findByAccountNumber(RECEIVER_ACCOUNT_NUMBER).orElseThrow();
-
-    assertThat(sender.getBalance()).isEqualTo(Money.of(BigDecimal.ZERO));
-
-    assertThat(receiver.getBalance()).isEqualTo(Money.of(BigDecimal.valueOf(1_000_000)));
+    assertThat(senderBalance).isEqualTo(Money.ZERO);
+    assertThat(receiverBalance).isEqualTo(Money.wons(1_000_000));
   }
 }

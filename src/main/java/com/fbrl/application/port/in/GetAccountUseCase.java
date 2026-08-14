@@ -1,7 +1,10 @@
 package com.fbrl.application.port.in;
 
 import com.fbrl.domain.model.Account;
+import com.fbrl.domain.model.Money;
 
 public interface GetAccountUseCase {
-  Account getAccount(String accountNumber);
+  AccountDetail getAccount(String accountNumber);
+
+  record AccountDetail(Account account, Money balance) {}
 }

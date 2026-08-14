@@ -1,7 +1,9 @@
 package com.fbrl.adapter.in.batch;
 
+import com.fbrl.application.port.in.VerifyTrialBalanceUseCase;
 import com.fbrl.application.port.out.LoadAllAccountsPort;
 import com.fbrl.application.port.out.SaveEodSnapshotPort;
+import com.fbrl.application.service.AccountBalanceCalculator;
 import com.fbrl.domain.model.Account;
 import com.fbrl.domain.model.EodSnapshot;
 import com.fbrl.domain.model.InterestPolicy;
@@ -25,8 +27,22 @@ public class EodSettlementJobConfig {
   private static final BigDecimal FIXED_ANNUAL_RATE = BigDecimal.valueOf(0.0365);
 
   @Bean
-  public Job eodSettlementJob(JobRepository jobRepository, Step eodSettlementStep) {
-    return new JobBuilder("eodSettlementJob", jobRepository).start(eodSettlementStep).build();
+  public Job eodSettlementJob(
+      JobRepository jobRepository, Step eodSettlementStep, Step trialBalanceVerificationStep) {
+    return new JobBuilder("eodSettlementJob", jobRepository)
+        .start(eodSettlementStep)
+        .next(trialBalanceVerificationStep)
+        .build();
+  }
+
+  @Bean
+  public Step trialBalanceVerificationStep(
+      JobRepository jobRepository,
+      PlatformTransactionManager transactionManager,
+      VerifyTrialBalanceUseCase verifyTrialBalanceUseCase) {
+    return new StepBuilder("trialBalanceVerificationStep", jobRepository)
+        .tasklet(new TrialBalanceVerificationTasklet(verifyTrialBalanceUseCase), transactionManager)
+        .build();
   }
 
   @Bean
@@ -54,9 +70,11 @@ public class EodSettlementJobConfig {
   @Bean
   @StepScope
   public AccountInterestItemProcessor accountInterestItemProcessor(
+      AccountBalanceCalculator accountBalanceCalculator,
       @Value("#{jobParameters['settlementDate']}") String settlementDate) {
     InterestPolicy interestPolicy = InterestPolicy.ofAnnualRate(FIXED_ANNUAL_RATE);
-    return new AccountInterestItemProcessor(interestPolicy, LocalDate.parse(settlementDate));
+    return new AccountInterestItemProcessor(
+        accountBalanceCalculator, interestPolicy, LocalDate.parse(settlementDate));
   }
 
   @Bean

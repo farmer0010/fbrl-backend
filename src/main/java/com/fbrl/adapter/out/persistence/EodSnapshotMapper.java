@@ -15,7 +15,8 @@ public class EodSnapshotMapper {
         entity.getAccountNumber(),
         Money.of(entity.getClosingBalance()),
         Money.of(entity.getInterestAmount()),
-        entity.getSettlementDate());
+        entity.getSettlementDate(),
+        entity.getComputedAt());
   }
 
   public EodSnapshotJpaEntity toEntity(EodSnapshot snapshot) {
@@ -27,6 +28,7 @@ public class EodSnapshotMapper {
         snapshot.accountNumber(),
         snapshot.closingBalance().getAmount(),
         snapshot.interestAmount().getAmount(),
-        snapshot.settlementDate());
+        snapshot.settlementDate(),
+        snapshot.computedAt());
   }
 }
