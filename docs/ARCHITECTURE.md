@@ -23,7 +23,7 @@ com.fbrl
 │   └── service        # UseCase 구현체 (CreateAccountService, TransferSagaOrchestrator, VerifyAuditChainService, ...)
 ├── adapter
 │   ├── in
-│   │   ├── web         # AccountController, TransferMoneyController, AuditController, GlobalExceptionHandler
+│   │   ├── web         # AccountController, TransferMoneyController, TransferApprovalController, AuditController, GlobalExceptionHandler
 │   │   ├── kafka        # TransferEventConsumer, KafkaRetryTopicConfig
 │   │   ├── batch         # EodSettlementJobConfig, AccountItemReader/Processor/Writer
 │   │   └── scheduler      # EodSettlementScheduler
@@ -32,6 +32,7 @@ com.fbrl
 │       ├── messaging      # KafkaProducerConfig/TopicConfig (Retry Topic 전용, Port 미구현)
 │       ├── participant     # WithdrawalParticipantAdapter, DepositParticipantAdapter (Saga 참여자)
 │       ├── kubernetes       # KubernetesLeaderElectionAdapter
+│       ├── fraud             # RuleBasedFraudCheckAdapter
 │       └── serialization     # JacksonPayloadSerializerAdapter
 └── global
     ├── common.annotation   # @DistributedLock, @CheckIdempotency
@@ -84,7 +85,7 @@ com.fbrl
 
 **선택 이유**: "같은 계좌 내 이벤트 순서"보다 "다른 계좌들의 처리량"을 지키는 쪽을 선택. `KafkaRetryTopicConfig`(`src/main/java/com/fbrl/adapter/in/kafka/KafkaRetryTopicConfig.java`)에서 `maxAttempts(4)` + 지수 백오프(1s→2s→4s..., 최대 30s)로 재시도하고, `NonRetryableEventProcessingException`을 상속한 결정론적 실패(`notRetryOn` + `traversingCauses`)는 재시도 없이 즉시 DLT로 라우팅.
 
-### 5. Kafka Retry Topic과 Resilience4j 서킷 브레이커의 역할 분리 — 이후 과제 8에서 서킷 브레이커 제거됨
+### 5. Kafka Retry Topic과 Resilience4j 서킷 브레이커의 역할 분리 — 이후 8번 결정에서 서킷 브레이커 제거됨
 
 **문제 상황**: Kafka 발행(`OutboxPollingScheduler` → `KafkaEventPublisherAdapter`)은 DB 트랜잭션 커밋 이후에 실행되는 post-commit 비동기 경로라, 실패해도 되돌릴 트랜잭션 자체가 없음. Consumer 측 재시도(4번 결정)와는 별개로 "Kafka 자체가 죽었는지"를 판단할 방법이 필요했음.
 
@@ -92,7 +93,7 @@ com.fbrl
 
 **선택 이유(당시)**: 배타적이지 않고 함께 사용. Retry Topic은 "이벤트 단위 재시도", 서킷 브레이커는 "Kafka 생사 판단 후 호출 자체를 차단"으로 역할을 나눔. `KafkaEventPublisherAdapter#publish()`(`adapter.out.messaging`)에 `@CircuitBreaker(name="kafkaEventPublisher", fallbackMethod="publishFallback")`를 적용했고, `fallbackMethod`는 실패를 삼키지 않고 항상 `EventPublishException`을 재던져 `PublishPendingOutboxEventsService`의 "실패 시 `markAsSent()` 호출 안 함" 계약을 보존.
 
-> 과제 8(PostgreSQL·Debezium CDC 전환)에서 Kafka 발행 자체가 애플리케이션 코드에서 사라지면서 이 문단이 설명하는 컴포넌트(`KafkaEventPublisherAdapter`, 서킷 브레이커 설정)는 모두 삭제됨. Retry Topic(4번 결정)은 Consumer 측 로직이라 그대로 유지.
+> 8번 결정(PostgreSQL·Debezium CDC 전환)에서 Kafka 발행 자체가 애플리케이션 코드에서 사라지면서 이 문단이 설명하는 컴포넌트(`KafkaEventPublisherAdapter`, 서킷 브레이커 설정)는 모두 삭제됨. Retry Topic(4번 결정)은 Consumer 측 로직이라 그대로 유지.
 
 ### 6. 낙관적 락 예외 catch 순서
 
@@ -108,7 +109,7 @@ com.fbrl
 
 **대안 비교**: 하나의 서비스 클래스 안에서 메서드만 분리 vs 별도 스프링 빈으로 분리.
 
-**선택 이유**: 별도 빈 분리만이 실제로 동작함. `AccountCreationExecutor`(`application.service`)는 `createInNewTransaction()`을 `@Transactional(REQUIRES_NEW)`로 별도 빈에 격리했고, `DistributedLockAspect`(`global.common.aop`)는 락 획득 후 실제 트랜잭션 실행을 별도 빈인 `AopForTransaction`에 위임. `@CircuitBreaker`도 한때 동일 원리로 `KafkaEventPublisherAdapter`에 적용해 검증했으나, 과제 8(PostgreSQL·Debezium CDC 전환)에서 발행 주체 자체가 애플리케이션에서 사라지면서 함께 제거됨.
+**선택 이유**: 별도 빈 분리만이 실제로 동작함. `AccountCreationExecutor`(`application.service`)는 `createInNewTransaction()`을 `@Transactional(REQUIRES_NEW)`로 별도 빈에 격리했고, `DistributedLockAspect`(`global.common.aop`)는 락 획득 후 실제 트랜잭션 실행을 별도 빈인 `AopForTransaction`에 위임. `@CircuitBreaker`도 한때 동일 원리로 `KafkaEventPublisherAdapter`에 적용해 검증했으나, 8번 결정(PostgreSQL·Debezium CDC 전환)에서 발행 주체 자체가 애플리케이션에서 사라지면서 함께 제거됨.
 
 ### 8. PostgreSQL 전환 및 Debezium CDC 도입 — 완료
 
@@ -185,6 +186,24 @@ com.fbrl
 - `OutboxEvent`(`domain.model`)에 `traceId`/`spanId` 필드 추가(순수 `String`, 프레임워크 의존 없음) — 도메인 계층에 트레이싱 관련 코드가 유입되지 않도록 값 자체만 보유.
 - `HTTP` 진입점(`AuditController` 등)은 `spring-boot-starter-opentelemetry` 추가만으로 Spring MVC 자동계측 대상에 이미 포함됨을 실측 확인(별도 코드 변경 불필요).
 - 로컬에 Kafka Connect + Debezium 커넥터를 실제로 등록하고 이체를 실행해, `outbox_event.trace_id`/`span_id`가 실제 `transfer-events` 토픽 메시지 헤더와 정확히 일치하고, Jaeger UI에서 `http post /api/v1/transfers` → `outbox.save` → `transfer-event.consume` 3-span이 동일 trace_id로 이어짐을 확인. 다만 이 검증은 수동이며, 자동화된 통합 테스트(`TransferTraceContinuityIntegrationTest`)는 `TransferEventConsumer.consume()`을 직접 호출하는 방식이라 Debezium 라우팅 자체는 커버하지 않음(기존에 이미 보류 처리된 "실제 Kafka 브로커 기반 통합 테스트"와 같은 종류의 갭).
+
+### 12. 룰 기반 이상거래 탐지 — 판정 로직을 도메인/어댑터 어디에 둘지
+
+**문제 상황**: `TransferMoneyController → TransferMoneyService`(직접 이체)와 `ApproveTransferService → TransferMoneyService`(Maker-Checker 승인 후 트리거) 두 경로가 모두 실제 자금 이동을 발생시키는데, Maker-Checker 승인 게이트(`TransferMoneyController.assertApprovalNotRequired()`)는 컨트롤러에만 있어 승인 경로가 이를 구조적으로 우회함(이 게이트는 우회돼도 문제 없음 — 이미 승인된 이체를 재차 막으면 안 되므로 의도된 설계). 이상거래 탐지는 반대로 두 경로 모두에서 빠짐없이 적용돼야 하므로, 같은 실수(게이트를 한쪽 진입점에만 두는 것)를 반복하지 않는 것이 설계 목표였음.
+
+**위치 대안 비교**: (a) `TransferMoneyController`(승인 게이트와 동일 위치, 승인 경로 우회됨) vs (b) `TransferMoneyService.transfer()` 내부(두 진입점의 유일한 합류점) vs (c) `@FraudCheck` 커스텀 애노테이션 + AOP(관심사 분리는 되지만 `@Order` 설정을 잘못하면 기존 `@DistributedLock` 바깥에서 돌아 카운팅 룰 도입 시 동시성 경합 재노출 위험).
+
+**선택 이유**: (b) 채택. `TransferMoneyService.transfer()`는 이미 `@DistributedLock(key = "#command.senderAccountNumber")`로 발신 계좌 단위 상호배제가 걸려 있어, 판정 로직을 이 메서드 초입(`assertNotReservedAccount`와 같은 위치대)에 두면 신규 락 없이 기존 락에 자연히 편승한다는 이점도 있음.
+
+**판정 로직의 계층 배치 — 리뷰 지적 사항**: 최초 구현은 임계치 비교(`amount.isGreaterThanOrEqual(threshold)`)를 `RuleBasedFraudCheckAdapter`(`adapter.out.fraud`, 인프라 계층) 안에 직접 작성했음. "임계치/규칙 비교" 성격의 로직을 `ApprovalPolicy`처럼 항상 프레임워크 무의존 `domain.model`에 둬온 이 프로젝트의 컨벤션과 다른 배치였고, Port(`FraudCheckPort`)로 감싼 의도(향후 어댑터를 외부 룰엔진/ML 기반으로 교체 가능하게)와도 맞지 않음 — "무엇이 의심거래인가"라는 업무 규칙이 어댑터 소유가 되면 어댑터 교체 시 그 규칙까지 함께 사라짐. 리뷰 지적 후 `domain.model.FraudPolicy(Money threshold)`(record, `isSuspicious(Money amount)`)를 신설해 `ApprovalPolicy`와 동형으로 맞추고, `RuleBasedFraudCheckAdapter`는 이 정책 객체에 위임만 하도록 축소. `FraudConfig`도 `Money` 타입 빈을 직접 노출하던 것(향후 다른 `Money` 빈과 타입 충돌 위험)을 `FraudPolicy` 빈으로 교체.
+
+**구현 내용**:
+- `application.port.out.FraudCheckPort` — `boolean isSuspicious(String accountNumber, Money amount)`. `DepositParticipantPort`/`WithdrawalParticipantPort`처럼 도메인 엔티티 전체가 아닌 최소 파라미터만 받음. 이 두 참여자 포트가 `Result(boolean, failureReason)`를 쓰는 것과 달리 `boolean` 단독 반환을 택한 이유: Result 패턴은 "예외를 오케스트레이터로 전파하지 않는" Saga 참여자 특유의 제약 때문인데, 이상거래 탐지는 판정 실패 시 즉시 예외를 던지는 설계라 그 전제가 다름.
+- `domain.exception.SuspiciousTransferException` — 판정 실패 시 던져지는 도메인 예외, `GlobalExceptionHandler`가 400으로 매핑.
+- `global.config.FraudPolicyProperties`(`@ConfigurationProperties(prefix="fraud")`) / `FraudConfig` — `ApprovalPolicyProperties`/`ApprovalConfig`와 동형으로 `application.yaml`의 `fraud.threshold`를 `FraudPolicy` 빈으로 조립.
+- `ApproveTransferTriggersFraudCheckIntegrationTest`(`@SpringBootTest`)로 Mock 없이 승인 경로에서도 threshold 이상 금액이 실제로 차단되고 잔액이 이동하지 않는지 검증 — Maker-Checker 승인 게이트가 겪었던 우회 사고의 재발 방지 확인.
+
+> PROGRESS.md 기준으로 이 결정은 과제 21에 해당하며, 그 사이 과제 13~15(PostgreSQL 전환, Debezium CDC 전환, 해시체인 감사로그)와 과제 20(거절 사유 조회 API)도 함께 복원·기록되었습니다. 자세한 내용은 [`PROGRESS.md`](./PROGRESS.md)를 참고하세요.
 
 ---
 

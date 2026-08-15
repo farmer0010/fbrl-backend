@@ -336,7 +336,67 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 - Boot 4.0: `spring-boot-starter-aop`가 `spring-boot-starter-aspectj`로 리네임됨(공식 이슈 #42948). 기존 이름으로 의존성을 추가하면 "버전을 찾을 수 없음" 형태의 에러가 나서 마치 버전 문제처럼 보이지만 실제로는 그 이름의 아티팩트 자체가 더 이상 없는 것 — Kafka starter, webmvc-test 패키지 이동과 동일 계열의 함정
 - Boot 4.0: `@MockBean`/`@SpyBean` 완전 제거(3.4부터 deprecated, 4.0에서 삭제), `org.springframework.test.context.bean.override.mockito.MockitoBean`/`MockitoSpyBean`으로 교체 필요
 
-### 과제 13: 복식부기 원장(Double-entry Ledger) 도입 (완료)
+### 과제 13: PostgreSQL 전환(MariaDB → PostgreSQL) (완료)
+
+브랜치: `feat/postgresql-migration` → `develop` (PR #27)
+
+- Debezium CDC 도입(과제 14)을 위한 선행 작업으로 MariaDB에서 PostgreSQL(`wal_level=logical`)로 전환.
+- `build.gradle`: MariaDB 드라이버 → `org.postgresql:postgresql` JDBC 드라이버 교체.
+- `docker-compose.yml`: `mariadb` 서비스 → `postgres`(`wal_level=logical` 설정 포함) 서비스로 교체.
+- `application.yaml`: `spring.datasource.url`/`driver-class-name`/`spring.jpa.database-platform`을 PostgreSQL 기준으로 변경.
+- AUTO_INCREMENT/IDENTITY 채번 전략, 테이블/컬럼 네이밍, 기존 JPA 락 사용 방식(`@Version`, `@Lock`)이 두 DB에서 동일하게 동작함을 확인 — 도메인 계층은 변경 없음(헥사고날 구조상 인프라 어댑터 교체만으로 DB 전환이 끝남).
+- 전체 테스트(`./gradlew test`) 통과 확인.
+
+### 과제 14: Outbox Polling → Debezium CDC 전환 (완료)
+
+브랜치: `feat/outbox-cdc-debezium` → `develop` (PR #28)
+
+**배경**
+
+- 과제 5에서 구현한 Outbox Polling 방식(`OutboxPollingScheduler`가 주기적으로 PENDING 이벤트를 조회해 Kafka로 발행)은 폴링 주기만큼 지연이 발생하고 폴링 자체가 부하로 작용. PostgreSQL(과제 13)의 논리적 복제(WAL)를 Kafka Connect + Debezium Outbox Event Router로 구독하면 폴링 없이 더 실시간에 가까운 발행이 가능.
+
+**구현 내용**
+
+- 발행 주체가 애플리케이션에서 인프라(Kafka Connect)로 완전히 이전되면서, `OutboxPollingScheduler`, `PublishPendingOutboxEventsUseCase`/`PublishPendingOutboxEventsService`, `LoadPendingOutboxEventsPort`, `EventPublisherPort`/`KafkaEventPublisherAdapter`, `EventPublishException`, 그리고 이 경로를 보호하던 Resilience4j 서킷 브레이커 설정(과제 12)까지 전부 삭제 — 더 이상 존재 이유가 없는 컴포넌트들.
+- `OutboxEvent`(`domain.model`)는 발행 확인 상태(`Status` enum, `markAsSent()`/`markAsFailed()`)를 제거하고 순수 append-only 로그로 전환.
+- `outbox_event.payload` 컬럼이 `@Lob` 매핑 시 PostgreSQL에서 `oid`(Large Object) 타입으로 생성되어 논리적 복제로 본문 캡처가 안 되는 문제를 커넥터를 직접 붙여 검증하다 발견 — `@Column(columnDefinition = "text")`로 변경해 해결.
+- Debezium Outbox Event Router(`debezium/outbox-connector.json`)는 `route.by.field`/`table.field.event.*` 설정으로 `aggregate_type`/`aggregate_id`/`event_type`/`payload` 컬럼명을 그대로 매핑, `route.topic.replacement`를 고정값 `transfer-events`로 오버라이드해 기존 `TransferEventConsumer`/Retry Topic 설정(과제 11)은 전혀 건드리지 않음.
+- `table.field.event.timestamp`는 `created_at`이 `timestamptz`(Debezium 표현상 STRING)라 이 필드가 요구하는 INT64와 맞지 않아 커넥터가 즉시 실패하는 것을 확인 — 미사용으로 두고 Debezium이 소스 커밋 시각을 자동 사용하도록 함.
+- 커넥터 등록 후 실제 INSERT → `transfer-events` 토픽 수신까지 로컬에서 직접 검증 완료.
+- 전체 테스트(`./gradlew test`) 통과 확인.
+
+### 과제 15: Outbox 해시체인 기반 불변 감사로그 (완료)
+
+브랜치: `feat/hash-chained-audit-log` → `main`(PR #30) → `develop`(PR #34, `chore/merge-main-hash-chain-into-develop`)
+
+**배경**
+
+- `OutboxEvent`는 과제 14에서 append-only 로그로 전환됐지만, "누구도 사후에 내용을 조용히 고칠 수 없다"는 보장까지는 없었음. 감사로그로서 신뢰받으려면 항목 하나라도 변조되면 반드시 감지할 수 있어야 함.
+
+**동시성 제어 설계**
+
+- 여러 트랜잭션이 동시에 `OutboxEvent`를 저장할 수 있는데("직전 해시 조회 → 다음 해시 계산" 구간에 직렬화가 없으면 체인이 갈라지거나 두 항목이 같은 `previousHash`를 참조하며 동시에 커밋될 위험), `outbox_chain_tail` 단일 행 테이블을 같은 REQUIRES_NEW 트랜잭션 안에서 `SELECT ... FOR UPDATE`로 잠그는 방식 채택 — Redisson 분산 락(Redis 장애 시 감사로그 기록 자체가 막힘) 대신 DB 트랜잭션 하나로 완결. 최초 기동 시 tail 행 부트스트랩 경합은 `INSERT ... ON CONFLICT DO NOTHING`으로 제거.
+
+**구현 내용**
+
+- `OutboxEvent`(`domain.model`)에 `previousHash`/`entryHash` 필드 추가. 해시는 Jackson 직렬화 대신 `(aggregateType, aggregateId, eventType, payload, createdAt.toString(), previousHash)`를 `"|"`로 명시적으로 이어붙여 SHA-256으로 계산(`recomputeEntryHash()`) — 라이브러리 버전에 따라 직렬화 포맷이 달라지면 검증 재현성이 깨지기 때문. `id`는 DB IDENTITY라 해시 계산 시점(insert 이전)엔 알 수 없어 해시 입력에서 의도적으로 제외.
+- 제네시스(체인 첫 항목)의 `previousHash`는 `null` 대신 64자리 `"0"` 문자열 상수(`OutboxEvent.GENESIS_PREVIOUS_HASH`)로 표현 — DB 컬럼을 NOT NULL로 유지하고 "null이면 특별 취급"하는 분기를 없애기 위함.
+- `OutboxChainTailJpaEntity`/`OutboxChainTailJpaRepository`(신규) — `OutboxPersistenceAdapter.save()`가 저장 시 tail을 `SELECT ... FOR UPDATE`로 잠그고 `previousHash`를 확정한 뒤 insert, 커밋 시점에 tail 갱신.
+- `VerifyAuditChainUseCase`/`VerifyAuditChainService`(`application`)와 `GET /api/v1/audit/verify`(`AuditController`, 신규) 추가 — 전체 체인을 id 오름차순으로 순회하며 `previousHash` 연결과 `entryHash` 재계산 일치 여부를 검증, 불일치 시 끊어진 `id`와 사유 반환.
+- Debezium 커넥터(과제 14)는 변경 없음 — 매핑 대상 컬럼이 그대로라 신규 컬럼(`previous_hash`, `entry_hash`)은 CDC 라우팅에 영향 없음.
+
+**테스트**
+
+- `OutboxChainConcurrencyTest` — 서로 다른 계좌쌍 50건 동시 송금(계좌별 Redisson 락으로는 서로 경합하지 않도록 의도적으로 분리) 시 체인이 갈라지지 않고 정확히 이어짐을 검증(entryHash/previousHash 각 50개 모두 유일).
+- `VerifyAuditChainServiceTest`, `OutboxEventTest` 추가.
+- 실제로 앱을 띄워 송금 2건 후 검증 API가 `valid=true`를 반환하는 것과, DB에서 직접 `payload`를 변조한 뒤 `entryHash` 불일치로 정확한 `id`에서 감지되는 것까지 직접 확인.
+
+**트러블슈팅**
+
+- `main` 브랜치(이 작업)와 `develop` 브랜치(과제 16, 복식부기 원장)가 병행 개발되며 서로 다른 시점에 각각 병합됨 — 이후 `develop`과 `main`을 병합하는 과정(`chore/merge-main-hash-chain-into-develop`)에서 `Account.create(String, Money)` 2-args 시그니처가 과제 16 작업으로 제거된 것을, 텍스트 충돌 없이 통과한 `OutboxChainConcurrencyTest`가 컴파일 실패로 뒤늦게 드러냄 — `Account.create(accountNumber)` + `LedgerEntry` 시딩으로 수정.
+- 과제 16(복식부기 원장) 작업 중, 로컬 Postgres에 (당시 develop에는 아직 merge되지 않은 상태였던) 이 브랜치의 스키마 잔재(`outbox_event.entry_hash`/`previous_hash` NOT NULL, `outbox_chain_tail` 테이블)가 남아있어 100스레드 동시성 테스트가 매번 실패하는 원인이 된 적 있음(순수 로컬 스키마 drift, 상세는 과제 16 참고).
+
+### 과제 16: 복식부기 원장(Double-entry Ledger) 도입 (완료)
 
 브랜치: `feat/double-entry-ledger` → `develop`
 
@@ -371,7 +431,7 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 - 신규 8개(`LedgerEntryTest`, `AccountBalanceCalculatorTest`, `VerifyTrialBalanceServiceTest`, `TrialBalanceVerificationTaskletTest`, `OpeningBalanceMigrationServiceTest`, `TransferMoneyServiceTest`의 예약 계좌 가드 테스트 2종 포함) + 기존 `balance` API 변경에 따른 11개 파일 수정.
 - 전체 테스트(`./gradlew test`) 61개 통과, `./gradlew spotlessCheck` 통과.
 
-### 과제 14: 분산 트레이싱(OpenTelemetry) 도입 (완료)
+### 과제 17: 분산 트레이싱(OpenTelemetry) 도입 (완료)
 
 브랜치: `feat/opentelemetry-tracing` → `develop` (PR #35)
 
@@ -403,7 +463,7 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 - 신규 3개(`OutboxPersistenceAdapterTest`, `TransferSagaOrchestratorTest`, `TransferTraceContinuityIntegrationTest`) + 기존 2개(`OutboxEventTest`, `TransferEventConsumerTest`) 확장.
 - 전체 테스트(`./gradlew test`) 78개 통과, `./gradlew spotlessCheck` 통과.
 
-### 과제 15: Money VO Jackson 역직렬화 버그 수정 (완료)
+### 과제 18: Money VO Jackson 역직렬화 버그 수정 (완료)
 
 브랜치: `fix/money-vo-jackson-deserialization` → `develop`
 
@@ -418,7 +478,7 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 **영향 범위 추정**
 
 - serialize(쓰기)는 getter만 있으면 되므로 실패하지 않음 — `TransferCompletedEvent`가 도입된 2026-08-05(과제 4, Outbox 통합) 시점부터도 이 부분은 문제없었음.
-- 실제로 deserialize(읽기)가 호출되는 지점은 `TransferEventConsumer`뿐이고, 이 컨슈머가 도입된 시점이 2026-08-14(과제 11, Kafka Consumer Retry/DLT 도입). 따라서 실제 배포 환경이었다면 **2026-08-14부터** `transfer-events` 토픽 메시지가 전부 재시도 후 DLT로 빠졌을 것으로 추정 — 과제 14(분산 트레이싱, 2026-08-15) 작업 중 Jaeger 트레이스 실물 확인 과정에서 처음 발견됨(과제 14 "부수 발견" 참고).
+- 실제로 deserialize(읽기)가 호출되는 지점은 `TransferEventConsumer`뿐이고, 이 컨슈머가 도입된 시점이 2026-08-14(과제 11, Kafka Consumer Retry/DLT 도입). 따라서 실제 배포 환경이었다면 **2026-08-14부터** `transfer-events` 토픽 메시지가 전부 재시도 후 DLT로 빠졌을 것으로 추정 — 과제 17(분산 트레이싱, 2026-08-15) 작업 중 Jaeger 트레이스 실물 확인 과정에서 처음 발견됨(과제 17 "부수 발견" 참고).
 
 **수정 내용**
 
@@ -435,22 +495,22 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 - 신규 2개(`serializeThenDeserialize_transferCompletedEventWithMoney_roundTrip`, `serializeThenDeserialize_moneyWithNegativeAmount_preservesDomainValidationException`).
 - 전체 테스트(`./gradlew test`) 80개 통과, `./gradlew spotlessCheck` 통과.
 
-### 과제 16: Maker-Checker(이중 승인) 도입 (완료 — 4-eyes principle)
+### 과제 19: Maker-Checker(이중 승인) 도입 (완료 — 4-eyes principle)
 
 브랜치: `feat/maker-checker-approval` → `develop`
 
 **배경**
 
 - 고액·정정 거래에서 한 사람의 실수/부정을 막기 위해, 기안자(Maker)가 이체를 요청하고 승인자(Checker)가 별도로 승인해야만 실제 자금 이동이 시작되는 내부통제 절차 도입. 대부분의 은행 규제가 요구하는 4-eyes principle 구현이 목표.
-- 코드 작성 전 4가지 설계 결정(배치/승인조건/신원표현/거절처리)을 옵션+트레이드오프로 먼저 보고하고 사용자 확정 후 구현(과제 13, 14와 동일한 "설계 승인 → 구현" 2단계 워크플로).
+- 코드 작성 전 4가지 설계 결정(배치/승인조건/신원표현/거절처리)을 옵션+트레이드오프로 먼저 보고하고 사용자 확정 후 구현(과제 16, 17과 동일한 "설계 승인 → 구현" 2단계 워크플로).
 - 착수 전 리서치에서 중요한 사실 발견: 작업지시서는 승인 완료 후 `StartTransferSagaUseCase`(Saga)를 트리거하는 것을 전제했으나, 실제 웹에 연결된 이체 경로는 `TransferMoneyController → TransferMoneyUseCase`(`TransferMoneyService`, 복식부기 원장 기반)이고 `StartTransferSagaUseCase`/`TransferSagaOrchestrator`는 컨트롤러가 없어 테스트에서만 호출되는 상태였음. 이 사실을 사용자에게 먼저 알리고 설계 결정에 반영.
 
 **설계 결정**
 
-1. **배치 — 전용 애그리게이트(`TransferApprovalRequest`) + 승인 완료 시 `TransferMoneyUseCase` 트리거**: "바뀌는 이유가 다르면 분리한다"는 기존 SRP 판단 기준(과제 8 `InterestPolicy`/`EodSnapshot` 분리, 과제 13 `LedgerEntry`/`Account` 분리와 동일 논리)을 적용 — 승인 정책이 바뀌는 이유와 이체 실행 메커니즘이 바뀌는 이유는 다름. `StartTransferSagaUseCase`가 아닌 실제 프로덕션 경로인 `TransferMoneyUseCase`를 트리거 대상으로 선택(위 "배경"의 발견 사항 반영).
+1. **배치 — 전용 애그리게이트(`TransferApprovalRequest`) + 승인 완료 시 `TransferMoneyUseCase` 트리거**: "바뀌는 이유가 다르면 분리한다"는 기존 SRP 판단 기준(과제 8 `InterestPolicy`/`EodSnapshot` 분리, 과제 16 `LedgerEntry`/`Account` 분리와 동일 논리)을 적용 — 승인 정책이 바뀌는 이유와 이체 실행 메커니즘이 바뀌는 이유는 다름. `StartTransferSagaUseCase`가 아닌 실제 프로덕션 경로인 `TransferMoneyUseCase`를 트리거 대상으로 선택(위 "배경"의 발견 사항 반영).
 2. **승인 조건 — 금액 threshold + 도메인 정책 객체(`ApprovalPolicy` record)**: `InterestPolicy`와 동일하게 도메인 계층에 정책을 두되, threshold 값 자체는 `application.yaml`(`approval.threshold`)에서 `ApprovalPolicyProperties`(`@ConfigurationProperties`)로 읽어 `ApprovalConfig`가 `ApprovalPolicy` 빈으로 조립.
 3. **신원 표현 — makerId/checkerId 단순 String + 자기승인 방지는 도메인 모델 내부**: 이 프로젝트가 계좌번호도 항상 raw String으로 표현하는 컨벤션과 일치시킴. `TransferApprovalRequest.approve()/reject()` 내부에서 `checkerId.equals(makerId)`를 검증해 `SelfApprovalNotAllowedException`을 던짐 — `LedgerEntry.transferPair`가 두 다리에 동일 `Money` 인스턴스를 강제해 불변식을 원천 차단하는 것과 동일한 invariant-by-construction 사고방식.
-4. **거절 처리 — `rejectionReason` 필드 추가(필수)**: 해시체인 감사로그(⚠️ 섹션 미작성 — 아래 '다음 작업' 참고)·OpenTelemetry(과제 14) 등 감사 추적성에 강하게 투자해온 프로젝트 컨벤션과 일치, 4-eyes principle 자체가 규제 대응 목적이라 "왜 거절했는지" 없는 감사 기록은 실효성이 떨어짐.
+4. **거절 처리 — `rejectionReason` 필드 추가(필수)**: 해시체인 감사로그(과제 15)·OpenTelemetry(과제 17) 등 감사 추적성에 강하게 투자해온 프로젝트 컨벤션과 일치, 4-eyes principle 자체가 규제 대응 목적이라 "왜 거절했는지" 없는 감사 기록은 실효성이 떨어짐.
 
 **부가 판단 (짧게 언급 후 구현)**
 
@@ -481,16 +541,79 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 - 게이트를 `TransferMoneyService`(application 계층)가 아닌 컨트롤러(`adapter.in.web`)에 둔 이유: `TransferMoneyUseCase`는 `TransferMoneyController`(직접 이체)와 `ApproveTransferService`(승인 후 트리거) 양쪽에서 공유하는 단일 인터페이스라, 서비스 계층에 게이트를 두면 정상 승인 흐름까지 막힘. `ApproveTransferService`는 컨트롤러를 거치지 않고 `TransferMoneyUseCase`를 직접 호출하므로, 게이트를 HTTP 진입점에만 둠으로써 컨트롤러를 우회하는 내부 호출 경로는 구조적으로 영향받지 않음.
 - 검증: `TransferControllerTest`에 threshold 이상 직접 요청 시 400 + `transferMoneyUseCase.transfer()` 미호출 검증 테스트 추가. `ApproveTransferBypassesWebGateIntegrationTest`(신규, `@SpringBootTest`)로 threshold 이상 금액도 승인 완료 후에는 실제 계좌 잔액이 이동하는지 Mock 없이 실물 DB로 검증 — 신규 2개 포함 전체 테스트 109개 통과, `spotlessCheck` 통과.
 
+### 과제 20: 거절 사유 조회 API (완료)
+
+브랜치: `feat/transfer-approval-rejection-reason-api` → `develop` (PR #44)
+
+**배경**
+
+- `TransferApprovalRequest.rejectionReason`은 과제 19(Maker-Checker)에서 이미 DB에 저장되고 있었지만, 이를 조회하는 API가 없는 상태였음. `GET /api/v1/transfer-approvals/{requestId}` 단건 조회 API 추가.
+
+**Port Out 재사용 판단**
+
+- 착수 전 조사에서 requestId(경로변수, 문자열 비즈니스 식별자)로 `TransferApprovalRequest`를 조회하는 재사용 가능한 Port Out이 이미 존재하는지 먼저 확인 — `LoadApprovalRequestPort.loadByRequestId(String requestId)`가 `ApproveTransferService`/`RejectTransferService`에서 동일한 목적으로 이미 쓰이고 있어 **신규 Port Out을 만들지 않고 그대로 재사용**.
+- 같은 논리로 "존재하지 않는 requestId" 예외도 `domain.exception.ApprovalRequestNotFoundException`(이미 `loadByRequestId` 실패 시 던져지고 `GlobalExceptionHandler`에 404로 매핑되어 있음)을 재사용 — 최초 작업지시서는 신규 예외 생성을 예시로 들었으나, 동일 목적의 예외를 중복 생성하지 않는 쪽을 택함.
+
+**구현 내용**
+
+- `application.port.in.GetApprovalRequestUseCase`(`TransferApprovalRequest getByRequestId(String requestId)`) / `application.service.GetApprovalRequestService` — `GetPendingApprovalsUseCase`/`GetPendingApprovalsService`와 동일하게 도메인 모델을 그대로 반환하는 조회 전용 유스케이스 컨벤션을 따름.
+- `adapter.in.web.dto.TransferApprovalDetailResponse`(record) — `TransferApprovalRequest` 전체 필드가 아니라 조회 목적에 필요한 필드만 선택(정보 노출 최소화, `TransferCompletedEvent`/`PendingApprovalResponse`와 동일한 원칙). PK `id`/`version`은 응답에 노출하지 않음.
+- 신규 컨트롤러를 만들지 않고 기존 `TransferApprovalController`에 `GET /{requestId}` 엔드포인트로 추가(같은 리소스는 한 컨트롤러에 모으는 기존 컨벤션 유지).
+
+**테스트**
+
+- `GetApprovalRequestServiceTest`(정상 조회/404 2종), `TransferApprovalControllerTest`에 2종 추가(정상 조회 200, 존재하지 않는 requestId 404).
+- 전체 테스트(`./gradlew test`) 통과 확인.
+
+### 과제 21: 룰 기반 이상거래 탐지(FraudCheckPort) 도입 (완료)
+
+브랜치: `feat/fraud-check-rule-engine` → `develop` (PR #46)
+
+**배경**
+
+- 단건 금액이 threshold를 넘으면 이상거래로 의심해 이체를 즉시 차단하는 최소 스코프 룰 엔진 도입. 기존 메모("Saga 흐름 중 어디에 끼울지가 쟁점")는 전제가 낡아 있어, 착수 전 실제 코드로 라이브 이체 경로부터 재확인 — `TransferSagaOrchestrator`/`StartTransferSagaUseCase`는 여전히 컨트롤러가 없어 웹에 연결되지 않았고, 라이브 경로는 `TransferMoneyController → TransferMoneyService`(과제 19와 동일 결론).
+- `TransferMoneyController`에 걸린 Maker-Checker 승인 게이트(`assertApprovalNotRequired()`)를 `ApproveTransferService`가 컨트롤러를 거치지 않고 `TransferMoneyUseCase`를 직접 호출해 우회하는 구조(과제 19 "심각한 게이트 누락 발견 및 수정" 사례)를 먼저 파악. 이상거래 탐지는 반대로 승인 경로에서도 빠짐없이 적용돼야 하므로(과제 19의 승인 게이트와 정반대 요구사항), 이 점을 설계 기준에 반영.
+
+**설계 결정**
+
+1. **위치 — `TransferMoneyService.transfer()` 내부(`assertNotReservedAccount`와 같은 위치대)**: 컨트롤러/AOP 옵션도 함께 제시했으나, 두 이체 진입점(`TransferMoneyController`, `ApproveTransferService`)이 유일하게 공유하는 지점이 이 메서드뿐이라 여기 두어야만 승인 경로도 구조적으로 커버됨. 이미 `@DistributedLock(key = "#command.senderAccountNumber")`가 걸려 있어, 향후 "짧은 시간 내 다건" 같은 카운팅 룰을 추가해도 신규 락 없이 기존 락에 편승 가능하다는 점도 이 위치를 선택한 근거.
+2. **판정 실패 처리 — 도메인 예외(`SuspiciousTransferException`) 즉시 던지기**: 별도 상태(심사 대기)로 전이하는 옵션도 제시했으나, 최소 스코프에서는 기존 도메인예외+`GlobalExceptionHandler` 컨벤션과 완전히 일치하는 예외 방식을 채택. 오탐 대응이 필요해지면 Maker-Checker의 `PENDING` 패턴을 재사용해 확장하는 것으로 미룸(YAGNI).
+3. **룰 스코프 — 단건 금액 임계치만**: "짧은 시간 내 동일 계좌 다건 이체" 같은 카운팅 룰은 상태 조회·동시성 설계가 추가로 필요해 범위가 커지므로 이번 스코프에서 제외.
+4. **형태 — `FraudCheckPort`(application.port.out)로 감싸기**: 순수 도메인 정책 객체만으로 충분한지 Port로 감쌀지 옵션을 제시했고, 사용자가 "지금은 단순 임계치 비교지만 향후 어댑터를 외부 룰엔진/ML 기반으로 교체할 가능성"을 이유로 Port 방식을 확정. `DepositParticipantPort`/`WithdrawalParticipantPort`와 동일하게 도메인 엔티티 전체가 아닌 최소 파라미터(계좌번호, `Money`)만 받는 시그니처로 설계.
+
+**구현 내용**
+
+- `domain.exception.SuspiciousTransferException` — `InvalidTransferAmountException`과 동일한 컨벤션.
+- `application.port.out.FraudCheckPort` — `boolean isSuspicious(String accountNumber, Money amount)`. Result 객체가 아닌 `boolean`을 택한 이유: Deposit/WithdrawalParticipantPort의 `Result(boolean, failureReason)` 패턴은 "예외를 오케스트레이터로 전파하지 않고 Result로 수렴시켜야 하는" Saga 참여자 특유의 제약(과제 6) 때문인데, 이번 설계 결정 2번(예외 던지기)은 그 전제가 다르므로 Result 래핑은 불필요한 추상화.
+- `global.config.FraudPolicyProperties`(`@ConfigurationProperties(prefix="fraud")`) / `global.config.FraudConfig` — `ApprovalPolicyProperties`/`ApprovalConfig`와 완전히 동형.
+- `adapter.out.fraud.RuleBasedFraudCheckAdapter`(신규 패키지) — `FraudCheckPort` 구현체.
+- `TransferMoneyService`에 `FraudCheckPort` 생성자 주입 + `assertNotSuspicious()` 가드클로즈 추가(`assertNotReservedAccount` 바로 다음, 계좌 조회 이전).
+- `GlobalExceptionHandler`에 `SuspiciousTransferException` → 400(`SUSPICIOUS_TRANSFER`) 매핑 추가.
+- `application.yaml`: `fraud.threshold: 50000000` 추가(기존 `approval.threshold: 10000000`과 별개 값).
+
+**FraudPolicy 도메인 계층 누락 및 재작업 (사용자 리뷰에서 지적됨)**
+
+- 설계안에서는 `ApprovalPolicy`와 동형인 `domain.model.FraudPolicy`로 시작하기로 했으나, 최초 구현은 임계치 비교 로직(`amount.isGreaterThanOrEqual(threshold)`)을 `RuleBasedFraudCheckAdapter`(adapter.out.fraud, 인프라 계층)에 직접 작성 — 사전 설계안과 diff를 대조한 사용자 리뷰로 지적됨(과제 19 "심각한 게이트 누락 발견 및 수정"과 같은 종류의 사례).
+- "무엇이 의심거래인가"(임계치 룰)라는 업무 규칙이 어댑터 소유가 되면, 나중에 어댑터를 외부 룰엔진으로 교체할 때 이 규칙까지 같이 사라짐. `FraudConfig`가 `Money` 타입 자체를 Spring 빈으로 노출한 것도, 향후 다른 `Money` 타입 빈이 추가되면 `NoUniqueBeanDefinitionException`으로 이어질 수 있는 잠재 결함으로 함께 지적됨.
+- 수정: `domain.model.FraudPolicy(Money threshold)`(record, `isSuspicious(Money amount)`) 신설 — `RuleBasedFraudCheckAdapter`는 이제 이 정책 객체에 위임만 함. `FraudConfig`도 `Money` 빈 대신 `FraudPolicy` 빈을 등록하도록 교체.
+
+**테스트**
+
+- `FraudPolicyTest`(도메인 순수 단위, `ApprovalPolicyTest`와 동형) — 임계치 이상/동일/미만 3케이스.
+- `RuleBasedFraudCheckAdapterTest` — `@ConfigurationProperties` 실바인딩 검증 1건 + `FraudPolicy` 위임 검증 1건.
+- `TransferMoneyServiceTest` — `FraudCheckPort` Mock 추가, 의심거래 시 `SuspiciousTransferException` + 원장/아웃박스 등 어떤 포트도 호출되지 않음(`verifyNoInteractions`) 검증.
+- **`ApproveTransferTriggersFraudCheckIntegrationTest`(신규, `@SpringBootTest`) — 과제 19의 `ApproveTransferBypassesWebGateIntegrationTest`와 동일한 패턴으로, `ApproveTransferService.approve()` 경유 승인 후 트리거 경로에서도 threshold 이상 금액이면 `SuspiciousTransferException`이 실제로 발생하고 잔액이 이동하지 않는지 Mock 없이 실물 DB로 검증** — 과제 19에서 승인 경로가 게이트를 우회했던 사고와 반대 방향(우회되면 안 되는 로직)의 재발 방지 확인.
+- 전체 테스트(`./gradlew test`) 통과 확인, `./gradlew spotlessCheck` 통과.
+
 ## 🚧 다음 작업
 
 - 트랙 3(장애 복구 & 카오스 엔지니어링) 두 과제(Kafka DLQ, Resilience4j) 완료 — 3개 트랙(실시간 트랜잭션/EOD 배치/장애복구) 모두 핵심 구현 최소 1개 이상 완료.
 - (협업 필요) Chaos Mesh 인프라 결함 주입 — 노션 "프로젝트 개요"상 Infra(김준희) 담당 업무. 백엔드가 처음부터 CRD/클러스터까지 다 짜는 게 아니라, "어떤 장애 시나리오로 무엇(서킷 브레이커/재시도 등)을 검증할지"를 먼저 정의해 인프라 담당자와 공유하고, 실제 장애 주입 후 애플리케이션 반응을 검증하는 역할 분담으로 진행할 것
 - (보류) 실제 Kafka 브로커 기반 재시도 토픽 → DLT 라우팅 통합 테스트 (과제 11에서 범위 분리)
 - (보류) 실제 Kafka 브로커 E2E 수동 검증
-- (보류) Debezium EventRouter SMT의 `table.fields.additional.placement`(trace_id/span_id 헤더 라우팅)를 커버하는 자동화된 통합 테스트 — 위 두 항목과 같은 이유(실제 Kafka 브로커 필요)로 보류, 현재는 로컬 수동 검증으로만 확인됨(과제 14 참고)
+- (보류) Debezium EventRouter SMT의 `table.fields.additional.placement`(trace_id/span_id 헤더 라우팅)를 커버하는 자동화된 통합 테스트 — 위 두 항목과 같은 이유(실제 Kafka 브로커 필요)로 보류, 현재는 로컬 수동 검증으로만 확인됨(과제 17 참고)
 - (보류) Testcontainers 기반 통합 테스트 재검증 — 프로젝트 전체가 docker-compose 기반 통합 테스트 컨벤션을 일관되게 쓰고 있어 현재는 도입 보류로 결정(Testcontainers는 이 컨벤션과 공존 시 일관성이 깨짐, YAGNI)
-- (권장) 실제 배포 대상 Postgres에 `accounts.balance` 컬럼 등 orphan 컬럼이 남아있다면 `ALTER TABLE ... DROP COLUMN`으로 별도 정리 필요(과제 13 참고, 이 프로젝트는 Flyway/Liquibase 미사용)
-- (문서 부채) PostgreSQL 전환/Debezium CDC 전환/해시체인 감사로그 3개 섹션이 실제 코드는 merge됐으나(커밋 de77994, 506ec45, c24411c) PROGRESS.md 갱신 커밋이 누락되어 문서에 없음 — 별도 세션에서 커밋 diff 기반으로 복원 필요
+- (권장) 실제 배포 대상 Postgres에 `accounts.balance` 컬럼 등 orphan 컬럼이 남아있다면 `ALTER TABLE ... DROP COLUMN`으로 별도 정리 필요(과제 16 참고, 이 프로젝트는 Flyway/Liquibase 미사용)
 
 ## 🤖 AI 에이전트(Claude Code) 활용 방침
 
@@ -508,7 +631,7 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 - 낙관적 락 사용 시 `@Version` 값이 도메인 매퍼에서 누락되지 않도록 주의
 - 통합 테스트(`@SpringBootTest`)는 Docker(MariaDB/Redis/Kafka)가 떠 있어야 함 → `docker compose up -d` 먼저 확인
 - Jackson 3: `ObjectMapper` 대신 불변(immutable) `JsonMapper`가 권장 진입점, Spring Boot가 자동 빈 등록
-- `private` 생성자만 가진 불변 VO(예: `Money`)를 Jackson (역)직렬화 대상으로 쓰려면 정적 팩토리에 `@JsonCreator`/`@JsonProperty`를 반드시 지정할 것 — 안 붙이면 serialize(쓰기, getter만 필요)는 성공하고 deserialize(읽기)만 조용히 실패하는 비대칭 버그가 생기고, Mock으로 `PayloadDeserializerPort`를 대체한 테스트로는 절대 못 잡음. Jackson 3에서도 `@JsonCreator`/`@JsonProperty`는 `com.fasterxml.jackson.annotation`(구 패키지) 그대로 사용(과제 15 참고)
+- `private` 생성자만 가진 불변 VO(예: `Money`)를 Jackson (역)직렬화 대상으로 쓰려면 정적 팩토리에 `@JsonCreator`/`@JsonProperty`를 반드시 지정할 것 — 안 붙이면 serialize(쓰기, getter만 필요)는 성공하고 deserialize(읽기)만 조용히 실패하는 비대칭 버그가 생기고, Mock으로 `PayloadDeserializerPort`를 대체한 테스트로는 절대 못 잡음. Jackson 3에서도 `@JsonCreator`/`@JsonProperty`는 `com.fasterxml.jackson.annotation`(구 패키지) 그대로 사용(과제 18 참고)
 - Mockito `@InjectMocks`는 `@Mock` 안 된 생성자 파라미터에 null을 채워 넣으므로, 서비스 생성자 파라미터가 늘어나면 관련 단위 테스트의 `@Mock` 필드도 반드시 같이 추가
 - JPA 전용 락(`@Lock(LockModeType...)`)을 다루는 클래스는 `adapter.out.persistence`에 위치
 - package-private으로 좁힌 interface는 이를 참조하던 테스트 파일도 같은 패키지로 함께 이동
@@ -539,9 +662,9 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 - Resilience4j 실패 판정: 어댑터가 예외를 던지는 컨벤션이면 `recordExceptions`만으로 충분하지만, boolean 등 반환값으로 성공/실패를 번역하는 컨벤션이면 `CircuitBreakerConfig.Builder.recordResult(Predicate)`로 별도 보강 필요 — 감싸인(wrapped) 예외 타입만 `recordExceptions`에 등록해야 함(원인 예외 타입을 나열해봤자 밖으로 실제로 던져지는 타입이 아니면 무의미)
 - Boot 4.0: `spring-boot-starter-aop` → `spring-boot-starter-aspectj`로 리네임(#42948), `@MockBean`/`@SpyBean` 완전 제거 → `@MockitoBean`/`@MockitoSpyBean`(`org.springframework.test.context.bean.override.mockito`) 사용
 - 이 프로젝트는 1인 개발이 아니라 Backend(본인)/Infra·SRE(김준희) 2인 협업 프로젝트임 — Chaos Mesh, K8s 클러스터 운영, GitOps/관측성 구축은 Infra 담당 영역이므로, 이런 영역을 "혼자 다 해야 하는지" 판단할 때는 먼저 노션 "프로젝트 개요"의 팀원 역할표를 확인할 것
-- Flyway/Liquibase 없이 `ddl-auto: update`만 쓰는 프로젝트에서 엔티티 필드를 제거해도 물리 컬럼은 DROP되지 않고 NOT NULL 제약만 orphan으로 남아 INSERT가 깨질 수 있음 — 로컬 DB에 이전 브랜치/이전 스키마 잔재가 없는지 항상 의심할 것(과제 13)
+- Flyway/Liquibase 없이 `ddl-auto: update`만 쓰는 프로젝트에서 엔티티 필드를 제거해도 물리 컬럼은 DROP되지 않고 NOT NULL 제약만 orphan으로 남아 INSERT가 깨질 수 있음 — 로컬 DB에 이전 브랜치/이전 스키마 잔재가 없는지 항상 의심할 것(과제 16)
 - 두 값(예: DEBIT/CREDIT 쌍)의 불변식을 지키려면 "따로 만들고 나중에 검증"(validate-after)보다 "애초에 어긋난 값을 만들 수 없는 시그니처"(invariant-by-construction, 예: `LedgerEntry.transferPair`가 두 다리에 동일 `Money` 인스턴스를 강제)가 더 신뢰도 높음
-- "존재하지 않아서 우연히 막히는" 방어(예: sentinel 계좌번호가 실제 row가 없어서 조회 실패로 차단됨)는 나중에 그 전제가 깨지면 조용히 무력화되므로, 알아챈 즉시 명시적 가드 클로즈 + 전용 도메인 예외로 전환할 것(과제 13, `ReservedAccountException`)
+- "존재하지 않아서 우연히 막히는" 방어(예: sentinel 계좌번호가 실제 row가 없어서 조회 실패로 차단됨)는 나중에 그 전제가 깨지면 조용히 무력화되므로, 알아챈 즉시 명시적 가드 클로즈 + 전용 도메인 예외로 전환할 것(과제 16, `ReservedAccountException`)
 
 ---
 
