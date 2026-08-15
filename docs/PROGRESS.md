@@ -435,6 +435,52 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 - 신규 2개(`serializeThenDeserialize_transferCompletedEventWithMoney_roundTrip`, `serializeThenDeserialize_moneyWithNegativeAmount_preservesDomainValidationException`).
 - 전체 테스트(`./gradlew test`) 80개 통과, `./gradlew spotlessCheck` 통과.
 
+### 과제 16: Maker-Checker(이중 승인) 도입 (완료 — 4-eyes principle)
+
+브랜치: `feat/maker-checker-approval` → `develop`
+
+**배경**
+
+- 고액·정정 거래에서 한 사람의 실수/부정을 막기 위해, 기안자(Maker)가 이체를 요청하고 승인자(Checker)가 별도로 승인해야만 실제 자금 이동이 시작되는 내부통제 절차 도입. 대부분의 은행 규제가 요구하는 4-eyes principle 구현이 목표.
+- 코드 작성 전 4가지 설계 결정(배치/승인조건/신원표현/거절처리)을 옵션+트레이드오프로 먼저 보고하고 사용자 확정 후 구현(과제 13, 14와 동일한 "설계 승인 → 구현" 2단계 워크플로).
+- 착수 전 리서치에서 중요한 사실 발견: 작업지시서는 승인 완료 후 `StartTransferSagaUseCase`(Saga)를 트리거하는 것을 전제했으나, 실제 웹에 연결된 이체 경로는 `TransferMoneyController → TransferMoneyUseCase`(`TransferMoneyService`, 복식부기 원장 기반)이고 `StartTransferSagaUseCase`/`TransferSagaOrchestrator`는 컨트롤러가 없어 테스트에서만 호출되는 상태였음. 이 사실을 사용자에게 먼저 알리고 설계 결정에 반영.
+
+**설계 결정**
+
+1. **배치 — 전용 애그리게이트(`TransferApprovalRequest`) + 승인 완료 시 `TransferMoneyUseCase` 트리거**: "바뀌는 이유가 다르면 분리한다"는 기존 SRP 판단 기준(과제 8 `InterestPolicy`/`EodSnapshot` 분리, 과제 13 `LedgerEntry`/`Account` 분리와 동일 논리)을 적용 — 승인 정책이 바뀌는 이유와 이체 실행 메커니즘이 바뀌는 이유는 다름. `StartTransferSagaUseCase`가 아닌 실제 프로덕션 경로인 `TransferMoneyUseCase`를 트리거 대상으로 선택(위 "배경"의 발견 사항 반영).
+2. **승인 조건 — 금액 threshold + 도메인 정책 객체(`ApprovalPolicy` record)**: `InterestPolicy`와 동일하게 도메인 계층에 정책을 두되, threshold 값 자체는 `application.yaml`(`approval.threshold`)에서 `ApprovalPolicyProperties`(`@ConfigurationProperties`)로 읽어 `ApprovalConfig`가 `ApprovalPolicy` 빈으로 조립.
+3. **신원 표현 — makerId/checkerId 단순 String + 자기승인 방지는 도메인 모델 내부**: 이 프로젝트가 계좌번호도 항상 raw String으로 표현하는 컨벤션과 일치시킴. `TransferApprovalRequest.approve()/reject()` 내부에서 `checkerId.equals(makerId)`를 검증해 `SelfApprovalNotAllowedException`을 던짐 — `LedgerEntry.transferPair`가 두 다리에 동일 `Money` 인스턴스를 강제해 불변식을 원천 차단하는 것과 동일한 invariant-by-construction 사고방식.
+4. **거절 처리 — `rejectionReason` 필드 추가(필수)**: 해시체인 감사로그(과제 9)·OpenTelemetry(과제 14) 등 감사 추적성에 강하게 투자해온 프로젝트 컨벤션과 일치, 4-eyes principle 자체가 규제 대응 목적이라 "왜 거절했는지" 없는 감사 기록은 실효성이 떨어짐.
+
+**부가 판단 (짧게 언급 후 구현)**
+
+- 승인 완료 후 트리거 방식: 직접 호출(동기) 선택 — 이 프로젝트에는 유스케이스 간 체이닝용 내부 이벤트 버스가 없고(Kafka는 Outbox를 통한 외부 발행 전용), 이 시점에 이벤트 기반 비동기 체이닝을 도입할 근거가 없어 YAGNI.
+- 동시성: 기존 `@Version` 낙관적 락 패턴을 그대로 재사용(`TransferSaga`/`Account`와 동일), `ObjectOptimisticLockingFailureException`(하위) → `DataAccessException`(상위) catch 순서 컨벤션도 동일하게 적용.
+
+**구현 내용**
+
+- `ApprovalStatus`(domain.model, enum) — PENDING→{APPROVED, REJECTED}만 허용하는 단순 상태 머신, `SagaStatus.canTransitionTo()`와 동일한 Switch Expression 패턴.
+- `TransferApprovalRequest`(domain.model) — `request()`/`reconstruct()` 이원화, `id`/`version` nullable 소유(Account/TransferSaga와 동일 컨벤션). `approve()`/`reject()`가 자기승인 차단 → 상태 전이 → 필드 갱신 순으로 처리.
+- `ApprovalPolicy`(domain.model record) — `requiresApproval(Money amount)`.
+- 신규 도메인 예외 7종(`domain.exception`): `InvalidApprovalTransitionException`, `SelfApprovalNotAllowedException`, `RejectionReasonRequiredException`, `ApprovalNotRequiredException`, `ApprovalRequestNotFoundException`, `ConcurrentApprovalModificationException`, `ApprovalPersistenceException`.
+- Port In 4종(`RequestTransferApprovalUseCase`, `ApproveTransferUseCase`, `RejectTransferUseCase`, `GetPendingApprovalsUseCase`) — `CreateAccountService`/`GetAccountService`처럼 유스케이스 1개당 서비스 1개 컨벤션을 그대로 따라 구현체도 4개로 분리(`RequestTransferApprovalService`, `ApproveTransferService`, `RejectTransferService`, `GetPendingApprovalsService`).
+- Port Out 2종(`SaveApprovalRequestPort`, `LoadApprovalRequestPort`) + 영속성 어댑터 4종(`TransferApprovalRequestJpaEntity`(`@Version` 보유), package-private `TransferApprovalRequestJpaRepository`, public `ApprovalRequestMapper`, `ApprovalPersistenceAdapter`) — `SagaPersistenceAdapter`와 동일한 catch 순서 컨벤션.
+- `TransferApprovalController`(`/api/v1/transfer-approvals`) — 승인 요청 생성(POST), 대기 목록 조회(GET /pending), 승인(POST /{id}/approve), 거절(POST /{id}/reject) 4개 엔드포인트.
+- `GlobalExceptionHandler`에 신규 예외 6종 매핑 추가(`INVALID_TRANSACTION` 그룹에 `InvalidTransferAmountException` 추가 포함) — 기존에 `InvalidSagaTransitionException`처럼 매핑이 누락된 채 500으로 흘러가던 갭을 신규 기능에서는 처음부터 만들지 않음.
+
+**테스트**
+
+- 신규 27개(`TransferApprovalRequestTest` 8, `ApprovalPolicyTest` 3, `RequestTransferApprovalServiceTest` 2, `ApproveTransferServiceTest` 3, `RejectTransferServiceTest` 3, `ApproveTransferConcurrencyTest` 1, `TransferApprovalControllerTest` 7).
+- `ApproveTransferConcurrencyTest`: 두 Checker가 동시에 같은 요청을 승인 시도 시 정확히 1건만 성공하고 나머지는 `ConcurrentApprovalModificationException`으로 실패하는지 실제 Postgres(`@SpringBootTest`) 기반으로 검증 — `TransferConcurrencyTest`(과제 1-2)와 동일한 CountDownLatch 패턴.
+- 전체 테스트(`./gradlew test`) 107개 통과(스킵 1건은 기존 `FbrlBackendApplicationTests`, 본 작업과 무관), `./gradlew spotlessCheck` 통과.
+
+**심각한 게이트 누락 발견 및 수정 (사용자 리뷰에서 지적됨)**
+
+- 최초 구현이 `TransferApprovalController`(신규 승인 워크플로)만 추가했을 뿐, 기존 `TransferMoneyController`(`/api/v1/transfers`)는 전혀 수정하지 않아 threshold 이상 금액도 승인 절차 없이 그대로 직접 이체가 가능했음 — Maker-Checker가 사실상 아무것도 강제하지 못하는 상태로 리뷰에서 지적됨.
+- `ApprovalRequiredException`(domain.exception) 신규 추가, `TransferMoneyController`에 `ApprovalPolicy`를 주입해 `assertApprovalNotRequired()` 가드를 요청 진입 시점에 적용 — threshold 이상이면 400 반환, `TransferMoneyUseCase.transfer()` 호출 자체를 막음.
+- 게이트를 `TransferMoneyService`(application 계층)가 아닌 컨트롤러(`adapter.in.web`)에 둔 이유: `TransferMoneyUseCase`는 `TransferMoneyController`(직접 이체)와 `ApproveTransferService`(승인 후 트리거) 양쪽에서 공유하는 단일 인터페이스라, 서비스 계층에 게이트를 두면 정상 승인 흐름까지 막힘. `ApproveTransferService`는 컨트롤러를 거치지 않고 `TransferMoneyUseCase`를 직접 호출하므로, 게이트를 HTTP 진입점에만 둠으로써 컨트롤러를 우회하는 내부 호출 경로는 구조적으로 영향받지 않음.
+- 검증: `TransferControllerTest`에 threshold 이상 직접 요청 시 400 + `transferMoneyUseCase.transfer()` 미호출 검증 테스트 추가. `ApproveTransferBypassesWebGateIntegrationTest`(신규, `@SpringBootTest`)로 threshold 이상 금액도 승인 완료 후에는 실제 계좌 잔액이 이동하는지 Mock 없이 실물 DB로 검증 — 신규 2개 포함 전체 테스트 109개 통과, `spotlessCheck` 통과.
+
 ## 🚧 다음 작업
 
 - 트랙 3(장애 복구 & 카오스 엔지니어링) 두 과제(Kafka DLQ, Resilience4j) 완료 — 3개 트랙(실시간 트랜잭션/EOD 배치/장애복구) 모두 핵심 구현 최소 1개 이상 완료.

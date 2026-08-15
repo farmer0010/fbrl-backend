@@ -70,3 +70,6 @@ k8s:
     lease-duration-seconds: 15
     renew-deadline-seconds: 10
     retry-period-seconds: 2
+
+approval:
+  threshold: 10000000
