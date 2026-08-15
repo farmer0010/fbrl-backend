@@ -9,12 +9,14 @@ import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.fbrl.application.port.in.TransferMoneyCommand;
 import com.fbrl.application.port.out.AccountRepositoryPort;
+import com.fbrl.application.port.out.FraudCheckPort;
 import com.fbrl.application.port.out.PayloadSerializerPort;
 import com.fbrl.application.port.out.SaveLedgerEntryPort;
 import com.fbrl.application.port.out.SaveOutboxEventPort;
 import com.fbrl.domain.exception.AccountNotFoundException;
 import com.fbrl.domain.exception.InsufficientBalanceException;
 import com.fbrl.domain.exception.ReservedAccountException;
+import com.fbrl.domain.exception.SuspiciousTransferException;
 import com.fbrl.domain.model.Account;
 import com.fbrl.domain.model.LedgerDirection;
 import com.fbrl.domain.model.LedgerEntry;
@@ -39,6 +41,7 @@ class TransferMoneyServiceTest {
   @Mock private SaveLedgerEntryPort saveLedgerEntryPort;
   @Mock private SaveOutboxEventPort saveOutboxEventPort;
   @Mock private PayloadSerializerPort payloadSerializerPort;
+  @Mock private FraudCheckPort fraudCheckPort;
 
   @InjectMocks private TransferMoneyService transferMoneyService;
 
@@ -132,6 +135,21 @@ class TransferMoneyServiceTest {
 
     assertThatThrownBy(() -> transferMoneyService.transfer(command))
         .isInstanceOf(ReservedAccountException.class);
+
+    verifyNoInteractions(
+        accountRepositoryPort, accountBalanceCalculator, saveLedgerEntryPort, saveOutboxEventPort);
+  }
+
+  @Test
+  @DisplayName("이상거래로 판정되면 SuspiciousTransferException이 발생하고 어떤 포트도 건드리지 않는다.")
+  void transferThrowsExceptionWhenSuspicious() {
+    TransferMoneyCommand command =
+        new TransferMoneyCommand("111-111", "222-222", Money.wons(100_000_000));
+
+    given(fraudCheckPort.isSuspicious("111-111", Money.wons(100_000_000))).willReturn(true);
+
+    assertThatThrownBy(() -> transferMoneyService.transfer(command))
+        .isInstanceOf(SuspiciousTransferException.class);
 
     verifyNoInteractions(
         accountRepositoryPort, accountBalanceCalculator, saveLedgerEntryPort, saveOutboxEventPort);

@@ -73,3 +73,6 @@ k8s:
 
 approval:
   threshold: 10000000
+
+fraud:
+  threshold: 50000000
