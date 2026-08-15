@@ -1,5 +1,6 @@
 package com.fbrl.global.config;
 
+import com.fbrl.domain.model.FraudPolicy;
 import com.fbrl.domain.model.Money;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -8,7 +9,7 @@ import org.springframework.context.annotation.Configuration;
 public class FraudConfig {
 
   @Bean
-  public Money fraudThreshold(FraudPolicyProperties fraudPolicyProperties) {
-    return Money.of(fraudPolicyProperties.threshold());
+  public FraudPolicy fraudPolicy(FraudPolicyProperties fraudPolicyProperties) {
+    return new FraudPolicy(Money.of(fraudPolicyProperties.threshold()));
   }
 }
