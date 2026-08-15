@@ -67,7 +67,7 @@ services:
     restart: always
 
   jaeger:
-    image: jaegertracing/all-in-one:1.62
+    image: jaegertracing/all-in-one:1.62.0
     container_name: fbrl-jaeger
     ports:
       - "16686:16686"
