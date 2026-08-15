@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-이 문서는 이 리포지토리에서 작업하는 모든 AI 에이전트 세션이 자동으로 참조하는 가드레일입니다. 아키텍처 배경은 [`ARCHITECTURE.md`](./ARCHITECTURE.md), 작업 이력/트러블슈팅은 [`PROGRESS.md`](./PROGRESS.md)를 함께 참고하세요.
+이 문서는 이 리포지토리에서 작업하는 모든 AI 에이전트 세션이 자동으로 참조하는 가드레일입니다. 아키텍처 배경은 [`ARCHITECTURE.md`](./docs/ARCHITECTURE.md), 작업 이력/트러블슈팅은 [`PROGRESS.md`](./docs/PROGRESS.md)를 함께 참고하세요.
 
 ## 새 작업 시작 전 필수 절차
 

@@ -1,5 +1,7 @@
 package com.fbrl.domain.model;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fbrl.domain.exception.InvalidMoneyException;
 import java.math.BigDecimal;
 import java.util.Objects;
@@ -17,7 +19,8 @@ public final class Money {
     return new Money(BigDecimal.valueOf(amount));
   }
 
-  public static Money of(BigDecimal amount) {
+  @JsonCreator
+  public static Money of(@JsonProperty("amount") BigDecimal amount) {
     return new Money(amount);
   }
 

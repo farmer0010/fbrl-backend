@@ -3,7 +3,11 @@ package com.fbrl.adapter.out.serialization;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.fbrl.domain.event.TransferCompletedEvent;
+import com.fbrl.domain.exception.InvalidMoneyException;
 import com.fbrl.domain.exception.PayloadDeserializationException;
+import com.fbrl.domain.model.Money;
+import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -30,6 +34,32 @@ class JacksonPayloadSerializerAdapterTest {
     SamplePayload restored = adapter.deserialize(json, SamplePayload.class);
 
     assertThat(restored).isEqualTo(original);
+  }
+
+  @Test
+  @DisplayName(
+      "Mock 없이 실제 JsonMapper로 Money를 포함한 TransferCompletedEvent를 직렬화-역직렬화하면 원본과 동일하게 복원된다.")
+  void serializeThenDeserialize_transferCompletedEventWithMoney_roundTrip() {
+    TransferCompletedEvent original =
+        new TransferCompletedEvent(
+            "1000-01", "1000-02", Money.wons(50_000), Instant.parse("2026-08-15T00:00:00Z"));
+
+    String json = adapter.serialize(original);
+    TransferCompletedEvent restored = adapter.deserialize(json, TransferCompletedEvent.class);
+
+    assertThat(restored).isEqualTo(original);
+  }
+
+  @Test
+  @DisplayName("음수 금액이 담긴 JSON을 역직렬화하면 Money의 도메인 검증 예외가 원인 체인에 보존된다.")
+  void serializeThenDeserialize_moneyWithNegativeAmount_preservesDomainValidationException() {
+    String negativeAmountJson = "{ \"amount\": -100 }";
+
+    assertThatThrownBy(() -> adapter.deserialize(negativeAmountJson, Money.class))
+        .isInstanceOf(PayloadDeserializationException.class)
+        .hasRootCauseInstanceOf(InvalidMoneyException.class)
+        .rootCause()
+        .hasMessageContaining("금액은 0원 이상이어야 합니다");
   }
 
   @Test

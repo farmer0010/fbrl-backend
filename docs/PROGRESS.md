@@ -403,6 +403,38 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 - 신규 3개(`OutboxPersistenceAdapterTest`, `TransferSagaOrchestratorTest`, `TransferTraceContinuityIntegrationTest`) + 기존 2개(`OutboxEventTest`, `TransferEventConsumerTest`) 확장.
 - 전체 테스트(`./gradlew test`) 78개 통과, `./gradlew spotlessCheck` 통과.
 
+### 과제 15: Money VO Jackson 역직렬화 버그 수정 (완료)
+
+브랜치: `fix/money-vo-jackson-deserialization` → `develop`
+
+**근본 원인**
+
+- `Money`(domain.model)는 `private` 생성자만 가진 불변 VO라 Jackson이 기본 전략(무인자 생성자 + setter)으로 역직렬화할 방법이 없었음. `TransferCompletedEvent`가 `Money` 필드를 포함하므로, 이 이벤트를 담은 페이로드는 직렬화(쓰기)는 성공하지만 역직렬화(읽기)는 항상 실패하는 비대칭 구조였음.
+
+**왜 지금까지 안 드러났는지**
+
+- `PayloadDeserializerPort`를 호출하는 쪽(`TransferEventConsumer`)의 기존 테스트가 전부 `PayloadDeserializerPort`를 Mock으로 대체하고 있어서, 실제 `JsonMapper`가 `Money`를 역직렬화하는 경로 자체가 테스트에서 한 번도 실행되지 않았음. Mock 테스트 통과가 "실제 역직렬화가 된다"는 증명이 아니었음.
+
+**영향 범위 추정**
+
+- serialize(쓰기)는 getter만 있으면 되므로 실패하지 않음 — `TransferCompletedEvent`가 도입된 2026-08-05(과제 4, Outbox 통합) 시점부터도 이 부분은 문제없었음.
+- 실제로 deserialize(읽기)가 호출되는 지점은 `TransferEventConsumer`뿐이고, 이 컨슈머가 도입된 시점이 2026-08-14(과제 11, Kafka Consumer Retry/DLT 도입). 따라서 실제 배포 환경이었다면 **2026-08-14부터** `transfer-events` 토픽 메시지가 전부 재시도 후 DLT로 빠졌을 것으로 추정 — 과제 14(분산 트레이싱, 2026-08-15) 작업 중 Jaeger 트레이스 실물 확인 과정에서 처음 발견됨(과제 14 "부수 발견" 참고).
+
+**수정 내용**
+
+- 기존 정적 팩토리 `Money.of(BigDecimal)`에 `@JsonCreator`/`@JsonProperty("amount")`(`com.fasterxml.jackson.annotation` — Jackson 3 `tools.jackson.databind`에서도 annotations 모듈은 이 구 패키지를 그대로 씀) 추가. `Money.of()` → private 생성자 → `validate()` 경로를 그대로 타므로 검증 로직(음수/null 금액 방지)을 우회하지 않음.
+- 전수조사 결과 `Money`를 필드로 가진 Jackson 직렬화 대상은 `TransferCompletedEvent`가 유일. 웹 DTO(`AccountResponse`, `TransferMoneyRequest`)는 애초에 경계에서 `BigDecimal`로 변환하는 컨벤션이라 동일 버그 클래스에서 벗어나 있음.
+
+**재발 방지책 (테스트)**
+
+- `JacksonPayloadSerializerAdapterTest`에 Mock 없이 실제 `JsonMapper`로 `TransferCompletedEvent`(Money 포함)를 직렬화→역직렬화하는 왕복 테스트 추가 — 이번 버그가 안 잡혔던 이유가 Mock 기반 테스트뿐이었기 때문이므로, 재발 방지의 핵심은 이 실제-왕복 테스트임.
+- 음수 금액이 담긴 JSON을 역직렬화했을 때 `InvalidMoneyException`이 원인 체인에 그대로 보존되는지 확인하는 테스트 추가 — creator 애노테이션이 검증 로직을 우회하는 새 생성 경로를 만들지 않았음을 실측으로 확인.
+
+**테스트**
+
+- 신규 2개(`serializeThenDeserialize_transferCompletedEventWithMoney_roundTrip`, `serializeThenDeserialize_moneyWithNegativeAmount_preservesDomainValidationException`).
+- 전체 테스트(`./gradlew test`) 80개 통과, `./gradlew spotlessCheck` 통과.
+
 ## 🚧 다음 작업
 
 - 트랙 3(장애 복구 & 카오스 엔지니어링) 두 과제(Kafka DLQ, Resilience4j) 완료 — 3개 트랙(실시간 트랜잭션/EOD 배치/장애복구) 모두 핵심 구현 최소 1개 이상 완료.
@@ -410,7 +442,6 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 - (보류) 실제 Kafka 브로커 기반 재시도 토픽 → DLT 라우팅 통합 테스트 (과제 11에서 범위 분리)
 - (보류) 실제 Kafka 브로커 E2E 수동 검증
 - (보류) Debezium EventRouter SMT의 `table.fields.additional.placement`(trace_id/span_id 헤더 라우팅)를 커버하는 자동화된 통합 테스트 — 위 두 항목과 같은 이유(실제 Kafka 브로커 필요)로 보류, 현재는 로컬 수동 검증으로만 확인됨(과제 14 참고)
-- (권장) `Money` VO에 Jackson creator 부재로 `TransferCompletedEvent` 실제 역직렬화가 항상 실패하는 버그 수정 (과제 14에서 발견, 별도 이슈로 다룰 것)
 - (보류) Testcontainers 기반 통합 테스트 재검증 — 프로젝트 전체가 docker-compose 기반 통합 테스트 컨벤션을 일관되게 쓰고 있어 현재는 도입 보류로 결정(Testcontainers는 이 컨벤션과 공존 시 일관성이 깨짐, YAGNI)
 - (권장) 실제 배포 대상 Postgres에 `accounts.balance` 컬럼 등 orphan 컬럼이 남아있다면 `ALTER TABLE ... DROP COLUMN`으로 별도 정리 필요(과제 13 참고, 이 프로젝트는 Flyway/Liquibase 미사용)
 
@@ -430,6 +461,7 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 - 낙관적 락 사용 시 `@Version` 값이 도메인 매퍼에서 누락되지 않도록 주의
 - 통합 테스트(`@SpringBootTest`)는 Docker(MariaDB/Redis/Kafka)가 떠 있어야 함 → `docker compose up -d` 먼저 확인
 - Jackson 3: `ObjectMapper` 대신 불변(immutable) `JsonMapper`가 권장 진입점, Spring Boot가 자동 빈 등록
+- `private` 생성자만 가진 불변 VO(예: `Money`)를 Jackson (역)직렬화 대상으로 쓰려면 정적 팩토리에 `@JsonCreator`/`@JsonProperty`를 반드시 지정할 것 — 안 붙이면 serialize(쓰기, getter만 필요)는 성공하고 deserialize(읽기)만 조용히 실패하는 비대칭 버그가 생기고, Mock으로 `PayloadDeserializerPort`를 대체한 테스트로는 절대 못 잡음. Jackson 3에서도 `@JsonCreator`/`@JsonProperty`는 `com.fasterxml.jackson.annotation`(구 패키지) 그대로 사용(과제 15 참고)
 - Mockito `@InjectMocks`는 `@Mock` 안 된 생성자 파라미터에 null을 채워 넣으므로, 서비스 생성자 파라미터가 늘어나면 관련 단위 테스트의 `@Mock` 필드도 반드시 같이 추가
 - JPA 전용 락(`@Lock(LockModeType...)`)을 다루는 클래스는 `adapter.out.persistence`에 위치
 - package-private으로 좁힌 interface는 이를 참조하던 테스트 파일도 같은 패키지로 함께 이동
