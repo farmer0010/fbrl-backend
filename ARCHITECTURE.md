@@ -167,6 +167,25 @@ com.fbrl
 - `LockComparisonService`(비관적/낙관적/Redisson 3종 락 벤치마크, 과제 1-2)는 `balance` 컬럼 제거로 전제가 깨져 락 비교 대상을 `AccountLockAnchorJpaEntity`(도메인 매핑 없는 인프라 전용 엔티티)로 교체 — 벤치마크 목적은 유지, 실제 이체 경로 동시성 제어는 여전히 Redisson 분산 락 단독.
 - Flyway/Liquibase 미사용(`ddl-auto: update`) 환경이라 `balance` 컬럼 제거는 애플리케이션 매핑 차원의 변경일 뿐 물리 컬럼은 자동 DROP되지 않음 — 실제 배포 시 별도 `ALTER TABLE ... DROP COLUMN` 마이그레이션 필요.
 
+### 11. 분산 트레이싱(OpenTelemetry) 도입 — 완료
+
+**문제 상황**: 이체 1건이 REQUIRES_NEW로 분리된 여러 스프링 빈(Saga 참여자), Outbox 저장, Debezium CDC, Kafka Consumer(재시도 토픽 포함)를 거치는 동안 인과관계를 추적할 방법이 없었음. 특히 Outbox → Debezium CDC → Kafka Consumer 구간은 애플리케이션 코드가 아니라 DB WAL을 거쳐가므로, 일반적인 Kafka producer의 trace context header 전파 방식이 그대로 통하지 않음.
+
+**대안 비교**:
+
+| 항목 | 옵션 | 선택 |
+|---|---|---|
+| 계측 방식 | (a) Micrometer Tracing(ObservationRegistry/`@Observed`) (b) OTel Java Agent(바이트코드 자동계측) (c) 순수 OTel SDK 수동계측 | **(a)** — Boot 4.0.7 네이티브 스택과 정합적. 단, `DepositParticipantPort.deposit()`이 실제 입금·보상 트랜잭션 두 곳에서 호출되어 `@Observed`(정적 애노테이션)로는 두 호출을 구분할 수 없어, 실제 구현은 `Tracer` API 수동 계측으로 전환(부수효과로 AOP 프록시를 타지 않아 self-invocation 리스크 카테고리 자체가 사라짐) |
+| Outbox→Kafka context 전파 | (a) traceparent를 payload JSON 필드에 포함 (b) `trace_id`/`span_id` 전용 컬럼 (c) 트레이스 단절 + Span Link만 연결 | **(b)** — `outbox_event`에 전용 컬럼 추가 → Debezium Outbox EventRouter SMT의 `table.fields.additional.placement`로 Kafka 헤더 라우팅 → Consumer가 W3C traceparent(`00-{traceId}-{spanId}-01`)로 재구성해 `Propagator.extract()`로 부모 span 복원. (a)는 payload가 entryHash 계산 입력이라 자동으로 "trace_id를 해시에 포함"을 강제하게 되어 기각 |
+| entryHash 계산에 trace_id 포함 여부 | (a) 포함 (b) 제외 | **(b)** — 감사로그(entryHash)는 업무적 사실 변조 여부를 증명하는 무결성 대상이고, trace_id는 샘플링/인프라 설정에 따라 달라지는 관측성 메타데이터라 목적이 다름. `OutboxEvent.withTraceContext()`는 entryHash 계산 이후에만 적용 |
+| Exporter 목적지 | (a) 콘솔 로깅 (b) 로컬 Jaeger(docker-compose) (c) 배포 환경 OTLP Collector 연동 | **(b)** 우선 적용, (c)는 Infra(김준희) 협의 필요 항목으로 별도 관리 — 배포 환경 Prometheus/Grafana 스택과 연동할 OTLP Collector 엔드포인트는 아직 미정 |
+
+**구현 내용**:
+- `TransferSagaOrchestrator`(출금/입금/보상 각 단계), `OutboxPersistenceAdapter.save()`(`outbox.save` span), `TransferEventConsumer.consume()`(재시도 토픽 리스너 포함, 같은 리스너 메서드를 공유)에 `io.micrometer.tracing.Tracer`를 직접 주입해 span 생성 — AOP 미사용으로 self-invocation 위험 자체를 회피.
+- `OutboxEvent`(`domain.model`)에 `traceId`/`spanId` 필드 추가(순수 `String`, 프레임워크 의존 없음) — 도메인 계층에 트레이싱 관련 코드가 유입되지 않도록 값 자체만 보유.
+- `HTTP` 진입점(`AuditController` 등)은 `spring-boot-starter-opentelemetry` 추가만으로 Spring MVC 자동계측 대상에 이미 포함됨을 실측 확인(별도 코드 변경 불필요).
+- 로컬에 Kafka Connect + Debezium 커넥터를 실제로 등록하고 이체를 실행해, `outbox_event.trace_id`/`span_id`가 실제 `transfer-events` 토픽 메시지 헤더와 정확히 일치하고, Jaeger UI에서 `http post /api/v1/transfers` → `outbox.save` → `transfer-event.consume` 3-span이 동일 trace_id로 이어짐을 확인. 다만 이 검증은 수동이며, 자동화된 통합 테스트(`TransferTraceContinuityIntegrationTest`)는 `TransferEventConsumer.consume()`을 직접 호출하는 방식이라 Debezium 라우팅 자체는 커버하지 않음(기존에 이미 보류 처리된 "실제 Kafka 브로커 기반 통합 테스트"와 같은 종류의 갭).
+
 ---
 
 각 결정의 배경/트러블슈팅 전체 기록은 [`PROGRESS.md`](./PROGRESS.md)를 참고하세요.

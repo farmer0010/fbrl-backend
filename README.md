@@ -15,6 +15,7 @@
 | CDC | Debezium 3.0.0.Final + Kafka Connect (PostgreSQL 논리적 복제 기반 Outbox Event Router) |
 | Batch | Spring Batch 6.0.4 |
 | 분산 스케줄링 | ShedLock 7.7.0, Kubernetes Lease API (client-java 27.0.0) |
+| 관측성 | Micrometer Tracing (OpenTelemetry bridge), Jaeger (로컬 트레이스 뷰어, OTLP 수신) |
 | Build | Gradle |
 
 ## 아키텍처
@@ -82,6 +83,7 @@ graph TB
 - 해시체인 기반 불변 감사로그 (`OutboxEvent`가 직전 항목의 SHA-256 해시를 포함, `outbox_chain_tail` 단일 행 `SELECT ... FOR UPDATE`로 동시 삽입 시 체인 분기 방지, `GET /api/v1/audit/verify`로 전체 체인 무결성 검증)
 - Saga 오케스트레이션 (`TransferSaga` 상태 머신 + 보상 트랜잭션, Choreography 대신 Orchestration 채택)
 - 복식부기 원장(`LedgerEntry`, append-only) — 계좌 잔액을 저장 필드가 아닌 원장 합산 파생값(SSOT)으로 전환, 거래 단위 대차평형은 `LedgerEntry.transferPair`로 구조적 보장
+- 분산 트레이싱 (Micrometer Tracing + OpenTelemetry bridge) — HTTP 요청 → Saga 각 단계 → Outbox 저장 → Debezium CDC → Kafka Consumer(재시도 토픽 포함)까지 하나의 trace_id로 연결. Outbox 전용 컬럼(`trace_id`/`span_id`)에 담아 Debezium EventRouter SMT로 Kafka 헤더에 실어 전파(감사로그 해시체인 계산 대상에서는 제외)
 
 ### 트랙 2 — EOD 대규모 정산 배치
 - Spring Batch 6.0.4 Chunk-oriented EOD 정산 Job (계좌별 일할 이자 계산 및 마감 스냅샷 저장)
@@ -95,7 +97,7 @@ graph TB
 
 ## 로컬 실행 방법
 
-의존 인프라(PostgreSQL, Redis, Kafka, Kafka Connect)는 `docker-compose.yml`로 기동합니다. Debezium 커넥터는 Kafka Connect REST API로 별도 등록해야 합니다.
+의존 인프라(PostgreSQL, Redis, Kafka, Kafka Connect, Jaeger)는 `docker-compose.yml`로 기동합니다. Debezium 커넥터는 Kafka Connect REST API로 별도 등록해야 합니다.
 
 ```bash
 docker compose up -d
@@ -107,6 +109,7 @@ curl -X POST -H "Content-Type: application/json" \
 
 - 계좌 개설/조회, 이체 API는 `localhost:8080`에서 확인할 수 있습니다.
 - 감사로그 체인 무결성은 `GET /api/v1/audit/verify`로 확인할 수 있습니다 (`{"valid":true,"totalEntries":N}`, 변조 시 `brokenAtId`/`reason` 포함).
+- 분산 트레이스는 Jaeger UI(`http://localhost:16686`)에서 확인할 수 있습니다. 기본 샘플링은 100%(`management.tracing.sampling.probability: 1.0`)이며, OTLP 엔드포인트는 `application.yaml`의 `management.opentelemetry.tracing.export.otlp.endpoint`에서 로컬 Jaeger를 가리킵니다(실제 배포 환경 OTLP Collector 엔드포인트는 미정 — Infra 협의 필요).
 - EOD 정산 배치는 기본적으로 자동 실행되지 않습니다 (`spring.batch.job.enabled: false`) — 파드 재시작 시 중복 실행을 방지하기 위함이며, `EodSettlementScheduler`의 cron 설정(`eod.batch.cron`)을 통해 트리거됩니다.
 - Kubernetes Lease 리더 선출 검증은 kind 등 로컬 클러스터와 `k8s/rbac/` 매니페스트 적용이 별도로 필요하며, 기본값은 비활성화(`k8s.leader-election.enabled: false`)되어 있습니다.
 - 실제 접속 정보(DB/Redis 계정 등)는 `src/main/resources/application.yaml` 및 `docker-compose.yml`을 직접 참고하세요. 이 문서에는 시크릿 값을 기재하지 않습니다.
