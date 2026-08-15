@@ -123,6 +123,6 @@ curl -X POST -H "Content-Type: application/json" \
 
 ## 더 알아보기
 
-- 아키텍처 상세 설명 및 기술적 의사결정 근거: [`ARCHITECTURE.md`](./ARCHITECTURE.md)
-- 전체 작업 이력/트러블슈팅 기록: [`PROGRESS.md`](./PROGRESS.md)
+- 아키텍처 상세 설명 및 기술적 의사결정 근거: [`ARCHITECTURE.md`](./docs/ARCHITECTURE.md)
+- 전체 작업 이력/트러블슈팅 기록: [`PROGRESS.md`](./docs/PROGRESS.md)
 - AI 에이전트 작업 가드레일: [`CLAUDE.md`](./CLAUDE.md)
