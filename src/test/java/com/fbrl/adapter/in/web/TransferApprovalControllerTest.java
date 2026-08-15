@@ -13,11 +13,13 @@ import com.fbrl.adapter.in.web.dto.RejectTransferRequest;
 import com.fbrl.adapter.in.web.dto.RequestTransferApprovalRequest;
 import com.fbrl.application.port.in.ApproveTransferUseCase;
 import com.fbrl.application.port.in.ApproveTransferUseCase.ApprovalDecisionResult;
+import com.fbrl.application.port.in.GetApprovalRequestUseCase;
 import com.fbrl.application.port.in.GetPendingApprovalsUseCase;
 import com.fbrl.application.port.in.RejectTransferUseCase;
 import com.fbrl.application.port.in.RequestTransferApprovalUseCase;
 import com.fbrl.application.port.in.RequestTransferApprovalUseCase.ApprovalRequestResult;
 import com.fbrl.domain.exception.ApprovalNotRequiredException;
+import com.fbrl.domain.exception.ApprovalRequestNotFoundException;
 import com.fbrl.domain.exception.SelfApprovalNotAllowedException;
 import com.fbrl.domain.model.ApprovalStatus;
 import com.fbrl.domain.model.Money;
@@ -43,6 +45,7 @@ class TransferApprovalControllerTest {
   private ApproveTransferUseCase approveTransferUseCase;
   private RejectTransferUseCase rejectTransferUseCase;
   private GetPendingApprovalsUseCase getPendingApprovalsUseCase;
+  private GetApprovalRequestUseCase getApprovalRequestUseCase;
 
   @BeforeEach
   void setUp() {
@@ -50,13 +53,15 @@ class TransferApprovalControllerTest {
     approveTransferUseCase = Mockito.mock(ApproveTransferUseCase.class);
     rejectTransferUseCase = Mockito.mock(RejectTransferUseCase.class);
     getPendingApprovalsUseCase = Mockito.mock(GetPendingApprovalsUseCase.class);
+    getApprovalRequestUseCase = Mockito.mock(GetApprovalRequestUseCase.class);
     mockMvc =
         MockMvcBuilders.standaloneSetup(
                 new TransferApprovalController(
                     requestTransferApprovalUseCase,
                     approveTransferUseCase,
                     rejectTransferUseCase,
-                    getPendingApprovalsUseCase))
+                    getPendingApprovalsUseCase,
+                    getApprovalRequestUseCase))
             .setControllerAdvice(new GlobalExceptionHandler())
             .build();
   }
@@ -113,6 +118,36 @@ class TransferApprovalControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$[0].requestId").value(pending.getRequestId()))
         .andExpect(jsonPath("$[0].makerId").value("maker-1"));
+  }
+
+  @Test
+  @DisplayName("존재하는 requestId로 단건 조회하면 200 OK와 함께 상세 정보를 반환한다.")
+  void getApprovalRequestSuccess() throws Exception {
+    TransferApprovalRequest request =
+        TransferApprovalRequest.request("maker-1", "111-111", "222-222", Money.wons(20_000_000));
+    request.reject("checker-1", "한도 초과 우려");
+    given(getApprovalRequestUseCase.getByRequestId(request.getRequestId())).willReturn(request);
+
+    mockMvc
+        .perform(get("/api/v1/transfer-approvals/" + request.getRequestId()))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.requestId").value(request.getRequestId()))
+        .andExpect(jsonPath("$.status").value("REJECTED"))
+        .andExpect(jsonPath("$.rejectionReason").value("한도 초과 우려"));
+  }
+
+  @Test
+  @DisplayName(
+      "존재하지 않는 requestId로 단건 조회하면 ApprovalRequestNotFoundException이 터져 404 Not Found를 반환한다.")
+  void getApprovalRequestNotFound() throws Exception {
+    willThrow(new ApprovalRequestNotFoundException("승인 요청을 찾을 수 없습니다. requestId: missing"))
+        .given(getApprovalRequestUseCase)
+        .getByRequestId("missing");
+
+    mockMvc
+        .perform(get("/api/v1/transfer-approvals/missing"))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("APPROVAL_REQUEST_NOT_FOUND"));
   }
 
   @Test

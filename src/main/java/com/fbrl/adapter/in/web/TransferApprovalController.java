@@ -5,7 +5,9 @@ import com.fbrl.adapter.in.web.dto.ApproveTransferRequest;
 import com.fbrl.adapter.in.web.dto.PendingApprovalResponse;
 import com.fbrl.adapter.in.web.dto.RejectTransferRequest;
 import com.fbrl.adapter.in.web.dto.RequestTransferApprovalRequest;
+import com.fbrl.adapter.in.web.dto.TransferApprovalDetailResponse;
 import com.fbrl.application.port.in.ApproveTransferUseCase;
+import com.fbrl.application.port.in.GetApprovalRequestUseCase;
 import com.fbrl.application.port.in.GetPendingApprovalsUseCase;
 import com.fbrl.application.port.in.RejectTransferUseCase;
 import com.fbrl.application.port.in.RequestTransferApprovalUseCase;
@@ -28,16 +30,19 @@ public class TransferApprovalController {
   private final ApproveTransferUseCase approveTransferUseCase;
   private final RejectTransferUseCase rejectTransferUseCase;
   private final GetPendingApprovalsUseCase getPendingApprovalsUseCase;
+  private final GetApprovalRequestUseCase getApprovalRequestUseCase;
 
   public TransferApprovalController(
       RequestTransferApprovalUseCase requestTransferApprovalUseCase,
       ApproveTransferUseCase approveTransferUseCase,
       RejectTransferUseCase rejectTransferUseCase,
-      GetPendingApprovalsUseCase getPendingApprovalsUseCase) {
+      GetPendingApprovalsUseCase getPendingApprovalsUseCase,
+      GetApprovalRequestUseCase getApprovalRequestUseCase) {
     this.requestTransferApprovalUseCase = requestTransferApprovalUseCase;
     this.approveTransferUseCase = approveTransferUseCase;
     this.rejectTransferUseCase = rejectTransferUseCase;
     this.getPendingApprovalsUseCase = getPendingApprovalsUseCase;
+    this.getApprovalRequestUseCase = getApprovalRequestUseCase;
   }
 
   @PostMapping
@@ -55,6 +60,14 @@ public class TransferApprovalController {
             .map(PendingApprovalResponse::from)
             .toList();
     return ResponseEntity.ok(responses);
+  }
+
+  @GetMapping("/{requestId}")
+  public ResponseEntity<TransferApprovalDetailResponse> getApprovalRequest(
+      @PathVariable String requestId) {
+    TransferApprovalDetailResponse response =
+        TransferApprovalDetailResponse.from(getApprovalRequestUseCase.getByRequestId(requestId));
+    return ResponseEntity.ok(response);
   }
 
   @PostMapping("/{requestId}/approve")
