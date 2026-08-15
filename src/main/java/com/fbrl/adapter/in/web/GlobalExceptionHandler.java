@@ -104,6 +104,13 @@ public class GlobalExceptionHandler {
         .body(ErrorResponse.of("APPROVAL_NOT_REQUIRED", e.getMessage()));
   }
 
+  @ExceptionHandler(ApprovalRequiredException.class)
+  public ResponseEntity<ErrorResponse> handleApprovalRequiredException(
+      ApprovalRequiredException e) {
+    return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+        .body(ErrorResponse.of("APPROVAL_REQUIRED", e.getMessage()));
+  }
+
   @ExceptionHandler(InvalidApprovalTransitionException.class)
   public ResponseEntity<ErrorResponse> handleInvalidApprovalTransitionException(
       InvalidApprovalTransitionException e) {

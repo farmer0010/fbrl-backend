@@ -3,6 +3,8 @@ package com.fbrl.adapter.in.web;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.willDoNothing;
 import static org.mockito.BDDMockito.willThrow;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -11,6 +13,8 @@ import com.fbrl.adapter.in.web.dto.TransferMoneyRequest;
 import com.fbrl.application.port.in.TransferMoneyUseCase;
 import com.fbrl.domain.exception.AccountNotFoundException;
 import com.fbrl.domain.exception.InsufficientBalanceException;
+import com.fbrl.domain.model.ApprovalPolicy;
+import com.fbrl.domain.model.Money;
 import java.math.BigDecimal;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -30,11 +34,14 @@ class TransferControllerTest {
 
   private TransferMoneyUseCase transferMoneyUseCase;
 
+  private final ApprovalPolicy approvalPolicy = new ApprovalPolicy(Money.wons(10_000_000));
+
   @BeforeEach
   void setUp() {
     transferMoneyUseCase = Mockito.mock(TransferMoneyUseCase.class);
     mockMvc =
-        MockMvcBuilders.standaloneSetup(new TransferMoneyController(transferMoneyUseCase))
+        MockMvcBuilders.standaloneSetup(
+                new TransferMoneyController(transferMoneyUseCase, approvalPolicy))
             .setControllerAdvice(new GlobalExceptionHandler())
             .build();
   }
@@ -109,5 +116,22 @@ class TransferControllerTest {
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("INVALID_TRANSACTION"))
         .andExpect(jsonPath("$.message").value("잔액이 부족합니다."));
+  }
+
+  @Test
+  @DisplayName("승인 임계 금액 이상을 직접 이체 요청하면 400 Bad Request를 반환하고 실제 이체를 실행하지 않는다.")
+  void transferRejectedWhenAmountRequiresApproval() throws Exception {
+    TransferMoneyRequest request =
+        new TransferMoneyRequest("111-111", "222-222", BigDecimal.valueOf(20_000_000));
+
+    mockMvc
+        .perform(
+            post("/api/v1/transfers")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(request)))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("APPROVAL_REQUIRED"));
+
+    verify(transferMoneyUseCase, never()).transfer(any());
   }
 }

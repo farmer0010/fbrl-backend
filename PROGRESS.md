@@ -474,6 +474,13 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 - `ApproveTransferConcurrencyTest`: 두 Checker가 동시에 같은 요청을 승인 시도 시 정확히 1건만 성공하고 나머지는 `ConcurrentApprovalModificationException`으로 실패하는지 실제 Postgres(`@SpringBootTest`) 기반으로 검증 — `TransferConcurrencyTest`(과제 1-2)와 동일한 CountDownLatch 패턴.
 - 전체 테스트(`./gradlew test`) 107개 통과(스킵 1건은 기존 `FbrlBackendApplicationTests`, 본 작업과 무관), `./gradlew spotlessCheck` 통과.
 
+**심각한 게이트 누락 발견 및 수정 (사용자 리뷰에서 지적됨)**
+
+- 최초 구현이 `TransferApprovalController`(신규 승인 워크플로)만 추가했을 뿐, 기존 `TransferMoneyController`(`/api/v1/transfers`)는 전혀 수정하지 않아 threshold 이상 금액도 승인 절차 없이 그대로 직접 이체가 가능했음 — Maker-Checker가 사실상 아무것도 강제하지 못하는 상태로 리뷰에서 지적됨.
+- `ApprovalRequiredException`(domain.exception) 신규 추가, `TransferMoneyController`에 `ApprovalPolicy`를 주입해 `assertApprovalNotRequired()` 가드를 요청 진입 시점에 적용 — threshold 이상이면 400 반환, `TransferMoneyUseCase.transfer()` 호출 자체를 막음.
+- 게이트를 `TransferMoneyService`(application 계층)가 아닌 컨트롤러(`adapter.in.web`)에 둔 이유: `TransferMoneyUseCase`는 `TransferMoneyController`(직접 이체)와 `ApproveTransferService`(승인 후 트리거) 양쪽에서 공유하는 단일 인터페이스라, 서비스 계층에 게이트를 두면 정상 승인 흐름까지 막힘. `ApproveTransferService`는 컨트롤러를 거치지 않고 `TransferMoneyUseCase`를 직접 호출하므로, 게이트를 HTTP 진입점에만 둠으로써 컨트롤러를 우회하는 내부 호출 경로는 구조적으로 영향받지 않음.
+- 검증: `TransferControllerTest`에 threshold 이상 직접 요청 시 400 + `transferMoneyUseCase.transfer()` 미호출 검증 테스트 추가. `ApproveTransferBypassesWebGateIntegrationTest`(신규, `@SpringBootTest`)로 threshold 이상 금액도 승인 완료 후에는 실제 계좌 잔액이 이동하는지 Mock 없이 실물 DB로 검증 — 신규 2개 포함 전체 테스트 109개 통과, `spotlessCheck` 통과.
+
 ## 🚧 다음 작업
 
 - 트랙 3(장애 복구 & 카오스 엔지니어링) 두 과제(Kafka DLQ, Resilience4j) 완료 — 3개 트랙(실시간 트랜잭션/EOD 배치/장애복구) 모두 핵심 구현 최소 1개 이상 완료.
