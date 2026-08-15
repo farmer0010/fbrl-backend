@@ -481,6 +481,46 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 - 게이트를 `TransferMoneyService`(application 계층)가 아닌 컨트롤러(`adapter.in.web`)에 둔 이유: `TransferMoneyUseCase`는 `TransferMoneyController`(직접 이체)와 `ApproveTransferService`(승인 후 트리거) 양쪽에서 공유하는 단일 인터페이스라, 서비스 계층에 게이트를 두면 정상 승인 흐름까지 막힘. `ApproveTransferService`는 컨트롤러를 거치지 않고 `TransferMoneyUseCase`를 직접 호출하므로, 게이트를 HTTP 진입점에만 둠으로써 컨트롤러를 우회하는 내부 호출 경로는 구조적으로 영향받지 않음.
 - 검증: `TransferControllerTest`에 threshold 이상 직접 요청 시 400 + `transferMoneyUseCase.transfer()` 미호출 검증 테스트 추가. `ApproveTransferBypassesWebGateIntegrationTest`(신규, `@SpringBootTest`)로 threshold 이상 금액도 승인 완료 후에는 실제 계좌 잔액이 이동하는지 Mock 없이 실물 DB로 검증 — 신규 2개 포함 전체 테스트 109개 통과, `spotlessCheck` 통과.
 
+### 과제 19: 룰 기반 이상거래 탐지(FraudCheckPort) 도입 (완료)
+
+브랜치: `feat/fraud-check-rule-engine` → `develop` (PR #46)
+
+**배경**
+
+- 단건 금액이 threshold를 넘으면 이상거래로 의심해 이체를 즉시 차단하는 최소 스코프 룰 엔진 도입. 착수 전 기존 메모("Saga 흐름 중 어디에 끼울지가 쟁점")를 그대로 믿지 않고 실제 코드로 라이브 이체 경로를 재확인 — `TransferSagaOrchestrator`/`StartTransferSagaUseCase`는 여전히 컨트롤러가 없어 웹에 연결되지 않은 상태이고, 실제 라이브 경로는 `TransferMoneyController → TransferMoneyService`(과제 16과 동일 결론)임을 재확인.
+- `TransferMoneyController`에 걸린 Maker-Checker 승인 게이트(`assertApprovalNotRequired()`)를 `ApproveTransferService`가 컨트롤러를 거치지 않고 `TransferMoneyUseCase`를 직접 호출해 우회하는 구조(과제 16 "심각한 게이트 누락 발견 및 수정" 사례)를 먼저 파악한 뒤, "이상거래 탐지는 승인 경로에서도 빠짐없이 적용돼야 한다"(과제 16의 승인 게이트와 반대로, 이번엔 우회되면 안 되는 로직)는 것을 설계 기준에 명시적으로 포함.
+
+**설계 결정 (옵션 제시 → 사용자 확정)**
+
+1. **위치 — `TransferMoneyService.transfer()` 내부(`assertNotReservedAccount`와 같은 위치대)**: 컨트롤러/AOP 옵션도 함께 제시했으나, 두 이체 진입점(`TransferMoneyController`, `ApproveTransferService`)이 유일하게 공유하는 지점이 이 메서드뿐이라 여기 두어야만 승인 경로도 구조적으로 커버됨. 이미 `@DistributedLock(key = "#command.senderAccountNumber")`가 걸려 있어, 향후 "짧은 시간 내 다건" 같은 카운팅 룰을 추가해도 신규 락 없이 기존 락에 편승 가능하다는 점도 이 위치를 선택한 근거.
+2. **판정 실패 처리 — 도메인 예외(`SuspiciousTransferException`) 즉시 던지기**: 별도 상태(심사 대기)로 전이하는 옵션도 제시했으나, 최소 스코프에서는 기존 도메인예외+`GlobalExceptionHandler` 컨벤션과 완전히 일치하는 예외 방식을 채택. 오탐 대응이 필요해지면 Maker-Checker의 `PENDING` 패턴을 재사용해 확장하는 것으로 미룸(YAGNI).
+3. **룰 스코프 — 단건 금액 임계치만**: "짧은 시간 내 동일 계좌 다건 이체" 같은 카운팅 룰은 상태 조회·동시성 설계가 추가로 필요해 범위가 커지므로 이번 스코프에서 제외.
+4. **형태 — `FraudCheckPort`(application.port.out)로 감싸기**: 순수 도메인 정책 객체만으로 충분한지 Port로 감쌀지 옵션을 제시했고, 사용자가 "지금은 단순 임계치 비교지만 향후 어댑터를 외부 룰엔진/ML 기반으로 교체할 가능성"을 이유로 Port 방식을 확정. `DepositParticipantPort`/`WithdrawalParticipantPort`와 동일하게 도메인 엔티티 전체가 아닌 최소 파라미터(계좌번호, `Money`)만 받는 시그니처로 설계.
+
+**구현 내용**
+
+- `domain.exception.SuspiciousTransferException` — `InvalidTransferAmountException`과 동일한 컨벤션.
+- `application.port.out.FraudCheckPort` — `boolean isSuspicious(String accountNumber, Money amount)`. Result 객체가 아닌 `boolean`을 택한 이유: Deposit/WithdrawalParticipantPort의 `Result(boolean, failureReason)` 패턴은 "예외를 오케스트레이터로 전파하지 않고 Result로 수렴시켜야 하는" Saga 참여자 특유의 제약(과제 6) 때문인데, 이번 설계 결정 2번(예외 던지기)은 그 전제가 다르므로 Result 래핑은 불필요한 추상화.
+- `global.config.FraudPolicyProperties`(`@ConfigurationProperties(prefix="fraud")`) / `global.config.FraudConfig` — `ApprovalPolicyProperties`/`ApprovalConfig`와 완전히 동형.
+- `adapter.out.fraud.RuleBasedFraudCheckAdapter`(신규 패키지) — `FraudCheckPort` 구현체.
+- `TransferMoneyService`에 `FraudCheckPort` 생성자 주입 + `assertNotSuspicious()` 가드클로즈 추가(`assertNotReservedAccount` 바로 다음, 계좌 조회 이전).
+- `GlobalExceptionHandler`에 `SuspiciousTransferException` → 400(`SUSPICIOUS_TRANSFER`) 매핑 추가.
+- `application.yaml`: `fraud.threshold: 50000000` 추가(기존 `approval.threshold: 10000000`과 별개 값).
+
+**리뷰에서 지적된 설계 이탈 및 재작업**
+
+- 최초 구현은 임계치 비교 로직(`amount.isGreaterThanOrEqual(threshold)`)을 `RuleBasedFraudCheckAdapter`(adapter.out.fraud, 인프라 계층) 안에 직접 박아 넣었음 — 스스로 사전에 "`ApprovalPolicy`와 동형인 `domain.model.FraudPolicy`로 시작하겠다"고 설계안에서 제안해놓고 구현 단계에서 이를 지키지 않은 것을 사용자 리뷰로 지적받음(과제 16 "심각한 게이트 누락 발견 및 수정"과 같은 종류의 사례 — 리뷰가 diff와 사전 설계안을 대조해 이탈을 잡아냄).
+- 문제의 핵심: "무엇이 의심거래인가"(임계치 룰)라는 업무 규칙 자체가 어댑터 소유가 되면, 나중에 어댑터를 외부 룰엔진으로 교체할 때 이 규칙까지 같이 사라짐. `FraudConfig`가 `Money` 타입 자체를 Spring 빈으로 노출한 것도, 향후 다른 `Money` 타입 빈이 추가되면 `NoUniqueBeanDefinitionException`으로 이어질 수 있는 잠재 결함으로 지적됨.
+- 수정: `domain.model.FraudPolicy(Money threshold)`(record, `isSuspicious(Money amount)`) 신설 — `RuleBasedFraudCheckAdapter`는 이제 이 정책 객체에 위임만 함. `FraudConfig`도 `Money` 빈 대신 `FraudPolicy` 빈을 등록하도록 교체.
+
+**테스트**
+
+- `FraudPolicyTest`(도메인 순수 단위, `ApprovalPolicyTest`와 동형) — 임계치 이상/동일/미만 3케이스.
+- `RuleBasedFraudCheckAdapterTest` — `@ConfigurationProperties` 실바인딩 검증 1건 + `FraudPolicy` 위임 검증 1건.
+- `TransferMoneyServiceTest` — `FraudCheckPort` Mock 추가, 의심거래 시 `SuspiciousTransferException` + 원장/아웃박스 등 어떤 포트도 호출되지 않음(`verifyNoInteractions`) 검증.
+- **`ApproveTransferTriggersFraudCheckIntegrationTest`(신규, `@SpringBootTest`) — 과제 16의 `ApproveTransferBypassesWebGateIntegrationTest`와 동일한 패턴으로, `ApproveTransferService.approve()` 경유 승인 후 트리거 경로에서도 threshold 이상 금액이면 `SuspiciousTransferException`이 실제로 발생하고 잔액이 이동하지 않는지 Mock 없이 실물 DB로 검증** — 과제 16에서 승인 경로가 게이트를 우회했던 사고와 반대 방향(우회되면 안 되는 로직)의 재발 방지 확인.
+- 전체 테스트(`./gradlew test`) 통과 확인, `./gradlew spotlessCheck` 통과.
+
 ## 🚧 다음 작업
 
 - 트랙 3(장애 복구 & 카오스 엔지니어링) 두 과제(Kafka DLQ, Resilience4j) 완료 — 3개 트랙(실시간 트랜잭션/EOD 배치/장애복구) 모두 핵심 구현 최소 1개 이상 완료.
@@ -490,7 +530,7 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 - (보류) Debezium EventRouter SMT의 `table.fields.additional.placement`(trace_id/span_id 헤더 라우팅)를 커버하는 자동화된 통합 테스트 — 위 두 항목과 같은 이유(실제 Kafka 브로커 필요)로 보류, 현재는 로컬 수동 검증으로만 확인됨(과제 14 참고)
 - (보류) Testcontainers 기반 통합 테스트 재검증 — 프로젝트 전체가 docker-compose 기반 통합 테스트 컨벤션을 일관되게 쓰고 있어 현재는 도입 보류로 결정(Testcontainers는 이 컨벤션과 공존 시 일관성이 깨짐, YAGNI)
 - (권장) 실제 배포 대상 Postgres에 `accounts.balance` 컬럼 등 orphan 컬럼이 남아있다면 `ALTER TABLE ... DROP COLUMN`으로 별도 정리 필요(과제 13 참고, 이 프로젝트는 Flyway/Liquibase 미사용)
-- (문서 부채) PostgreSQL 전환/Debezium CDC 전환/해시체인 감사로그 3개 섹션이 실제 코드는 merge됐으나(커밋 de77994, 506ec45, c24411c) PROGRESS.md 갱신 커밋이 누락되어 문서에 없음 — 별도 세션에서 커밋 diff 기반으로 복원 필요
+- (문서 부채) PostgreSQL 전환/Debezium CDC 전환/해시체인 감사로그 3개 섹션이 실제 코드는 merge됐으나(커밋 de77994, 506ec45, c24411c) PROGRESS.md 갱신 커밋이 누락되어 문서에 없음 — 별도 세션에서 커밋 diff 기반으로 복원 필요. 번호 17~18은 이 3개 섹션 복원용으로 비워둔 상태이며(3개라 정확히 2자리는 아니지만 임시로 예약), 과제 19(이상거래 탐지)부터 다시 이어짐 — 복원 시 전체 재번호 필요
 
 ## 🤖 AI 에이전트(Claude Code) 활용 방침
 

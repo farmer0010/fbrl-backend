@@ -32,6 +32,7 @@ com.fbrl
 │       ├── messaging      # KafkaProducerConfig/TopicConfig (Retry Topic 전용, Port 미구현)
 │       ├── participant     # WithdrawalParticipantAdapter, DepositParticipantAdapter (Saga 참여자)
 │       ├── kubernetes       # KubernetesLeaderElectionAdapter
+│       ├── fraud             # RuleBasedFraudCheckAdapter
 │       └── serialization     # JacksonPayloadSerializerAdapter
 └── global
     ├── common.annotation   # @DistributedLock, @CheckIdempotency
@@ -185,6 +186,24 @@ com.fbrl
 - `OutboxEvent`(`domain.model`)에 `traceId`/`spanId` 필드 추가(순수 `String`, 프레임워크 의존 없음) — 도메인 계층에 트레이싱 관련 코드가 유입되지 않도록 값 자체만 보유.
 - `HTTP` 진입점(`AuditController` 등)은 `spring-boot-starter-opentelemetry` 추가만으로 Spring MVC 자동계측 대상에 이미 포함됨을 실측 확인(별도 코드 변경 불필요).
 - 로컬에 Kafka Connect + Debezium 커넥터를 실제로 등록하고 이체를 실행해, `outbox_event.trace_id`/`span_id`가 실제 `transfer-events` 토픽 메시지 헤더와 정확히 일치하고, Jaeger UI에서 `http post /api/v1/transfers` → `outbox.save` → `transfer-event.consume` 3-span이 동일 trace_id로 이어짐을 확인. 다만 이 검증은 수동이며, 자동화된 통합 테스트(`TransferTraceContinuityIntegrationTest`)는 `TransferEventConsumer.consume()`을 직접 호출하는 방식이라 Debezium 라우팅 자체는 커버하지 않음(기존에 이미 보류 처리된 "실제 Kafka 브로커 기반 통합 테스트"와 같은 종류의 갭).
+
+### 12. 룰 기반 이상거래 탐지 — 판정 로직을 도메인/어댑터 어디에 둘지
+
+**문제 상황**: `TransferMoneyController → TransferMoneyService`(직접 이체)와 `ApproveTransferService → TransferMoneyService`(Maker-Checker 승인 후 트리거) 두 경로가 모두 실제 자금 이동을 발생시키는데, Maker-Checker 승인 게이트(`TransferMoneyController.assertApprovalNotRequired()`)는 컨트롤러에만 있어 승인 경로가 이를 구조적으로 우회함(이 게이트는 우회돼도 문제 없음 — 이미 승인된 이체를 재차 막으면 안 되므로 의도된 설계). 이상거래 탐지는 반대로 두 경로 모두에서 빠짐없이 적용돼야 하므로, 같은 실수(게이트를 한쪽 진입점에만 두는 것)를 반복하지 않는 것이 설계 목표였음.
+
+**위치 대안 비교**: (a) `TransferMoneyController`(승인 게이트와 동일 위치, 승인 경로 우회됨) vs (b) `TransferMoneyService.transfer()` 내부(두 진입점의 유일한 합류점) vs (c) `@FraudCheck` 커스텀 애노테이션 + AOP(관심사 분리는 되지만 `@Order` 설정을 잘못하면 기존 `@DistributedLock` 바깥에서 돌아 카운팅 룰 도입 시 동시성 경합 재노출 위험).
+
+**선택 이유**: (b) 채택. `TransferMoneyService.transfer()`는 이미 `@DistributedLock(key = "#command.senderAccountNumber")`로 발신 계좌 단위 상호배제가 걸려 있어, 판정 로직을 이 메서드 초입(`assertNotReservedAccount`와 같은 위치대)에 두면 신규 락 없이 기존 락에 자연히 편승한다는 이점도 있음.
+
+**판정 로직의 계층 배치 — 리뷰에서 지적된 이탈과 재작업**: 최초 구현은 임계치 비교(`amount.isGreaterThanOrEqual(threshold)`)를 `RuleBasedFraudCheckAdapter`(`adapter.out.fraud`, 인프라 계층) 안에 직접 작성했음. 이 프로젝트가 "임계치/규칙 비교" 성격의 로직을 `ApprovalPolicy`처럼 항상 프레임워크 무의존 `domain.model`에 둬온 것과 다른 배치였고, Port(`FraudCheckPort`)로 감싼 의도(향후 어댑터를 외부 룰엔진/ML 기반으로 교체 가능하게)와도 맞지 않음 — "무엇이 의심거래인가"라는 업무 규칙 자체가 어댑터 소유가 되면 어댑터 교체 시 그 규칙까지 함께 사라짐. 리뷰 지적 후 `domain.model.FraudPolicy(Money threshold)`(record, `isSuspicious(Money amount)`)를 신설해 `ApprovalPolicy`와 동형으로 맞추고, `RuleBasedFraudCheckAdapter`는 이 정책 객체에 위임만 하도록 축소. `FraudConfig`도 `Money` 타입 빈을 직접 노출하던 것(향후 다른 `Money` 빈과 타입 충돌 위험)을 `FraudPolicy` 빈으로 교체.
+
+**구현 내용**:
+- `application.port.out.FraudCheckPort` — `boolean isSuspicious(String accountNumber, Money amount)`. `DepositParticipantPort`/`WithdrawalParticipantPort`처럼 도메인 엔티티 전체가 아닌 최소 파라미터만 받음. 이 두 참여자 포트가 `Result(boolean, failureReason)`를 쓰는 것과 달리 `boolean` 단독 반환을 택한 이유: Result 패턴은 "예외를 오케스트레이터로 전파하지 않는" Saga 참여자 특유의 제약 때문인데, 이상거래 탐지는 판정 실패 시 즉시 예외를 던지는 설계라 그 전제가 다름.
+- `domain.exception.SuspiciousTransferException` — 판정 실패 시 던져지는 도메인 예외, `GlobalExceptionHandler`가 400으로 매핑.
+- `global.config.FraudPolicyProperties`(`@ConfigurationProperties(prefix="fraud")`) / `FraudConfig` — `ApprovalPolicyProperties`/`ApprovalConfig`와 동형으로 `application.yaml`의 `fraud.threshold`를 `FraudPolicy` 빈으로 조립.
+- `ApproveTransferTriggersFraudCheckIntegrationTest`(`@SpringBootTest`)로 Mock 없이 승인 경로에서도 threshold 이상 금액이 실제로 차단되고 잔액이 이동하지 않는지 검증 — Maker-Checker 승인 게이트가 겪었던 우회 사고의 재발 방지 확인.
+
+> 이 결정과 과제 16(Maker-Checker) 사이의 PROGRESS.md 과제 번호(17~18)는 아직 별도 세션에서 복원 예정인 다른 완료 작업(PostgreSQL 전환, Debezium CDC 전환, 해시체인 감사로그)용으로 예약되어 있습니다. 자세한 내용은 [`PROGRESS.md`](./PROGRESS.md)의 "다음 작업 → 문서 부채" 항목을 참고하세요.
 
 ---
 

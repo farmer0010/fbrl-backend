@@ -48,6 +48,7 @@ graph TB
         MSG["messaging<br/>(Kafka Producer, Retry Topic 전용)"]
         PARTICIPANT["participant<br/>(Saga 참여자)"]
         K8S["kubernetes<br/>(LeaderElection)"]
+        FRAUD["fraud<br/>(RuleBasedFraudCheckAdapter)"]
     end
 
     subgraph external_infra["앱 프로세스 밖 — 인프라"]
@@ -66,6 +67,7 @@ graph TB
     PORT_OUT -.구현.-> PERSIST
     PORT_OUT -.구현.-> PARTICIPANT
     PORT_OUT -.구현.-> K8S
+    PORT_OUT -.구현.-> FRAUD
 
     PERSIST --> MODEL
     PARTICIPANT --> MODEL
@@ -84,6 +86,7 @@ graph TB
 - Saga 오케스트레이션 (`TransferSaga` 상태 머신 + 보상 트랜잭션, Choreography 대신 Orchestration 채택)
 - 복식부기 원장(`LedgerEntry`, append-only) — 계좌 잔액을 저장 필드가 아닌 원장 합산 파생값(SSOT)으로 전환, 거래 단위 대차평형은 `LedgerEntry.transferPair`로 구조적 보장
 - 분산 트레이싱 (Micrometer Tracing + OpenTelemetry bridge) — HTTP 요청 → Saga 각 단계 → Outbox 저장 → Debezium CDC → Kafka Consumer(재시도 토픽 포함)까지 하나의 trace_id로 연결. Outbox 전용 컬럼(`trace_id`/`span_id`)에 담아 Debezium EventRouter SMT로 Kafka 헤더에 실어 전파(감사로그 해시체인 계산 대상에서는 제외)
+- 룰 기반 이상거래 탐지 (`FraudCheckPort`) — 단건 금액이 threshold를 초과하면 `SuspiciousTransferException`으로 이체를 즉시 차단. `TransferMoneyService.transfer()` 내부(기존 `@DistributedLock` 안쪽)에 위치해, 직접 이체(`TransferMoneyController`)와 Maker-Checker 승인 후 트리거(`ApproveTransferService`) 두 경로 모두에서 우회 없이 적용됨
 
 ### 트랙 2 — EOD 대규모 정산 배치
 - Spring Batch 6.0.4 Chunk-oriented EOD 정산 Job (계좌별 일할 이자 계산 및 마감 스냅샷 저장)
