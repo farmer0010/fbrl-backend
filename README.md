@@ -25,7 +25,7 @@
 ```mermaid
 graph TB
     subgraph adapter_in["adapter.in — 입력 어댑터"]
-        WEB["web<br/>(AccountController, TransferMoneyController, AuditController)"]
+        WEB["web<br/>(AccountController, TransferMoneyController, TransferApprovalController, AuditController)"]
         KAFKA_IN["kafka<br/>(TransferEventConsumer)"]
         BATCH["batch<br/>(EodSettlementJobConfig)"]
         SCHED["scheduler<br/>(EodSettlementScheduler)"]
@@ -86,6 +86,7 @@ graph TB
 - Saga 오케스트레이션 (`TransferSaga` 상태 머신 + 보상 트랜잭션, Choreography 대신 Orchestration 채택)
 - 복식부기 원장(`LedgerEntry`, append-only) — 계좌 잔액을 저장 필드가 아닌 원장 합산 파생값(SSOT)으로 전환, 거래 단위 대차평형은 `LedgerEntry.transferPair`로 구조적 보장
 - 분산 트레이싱 (Micrometer Tracing + OpenTelemetry bridge) — HTTP 요청 → Saga 각 단계 → Outbox 저장 → Debezium CDC → Kafka Consumer(재시도 토픽 포함)까지 하나의 trace_id로 연결. Outbox 전용 컬럼(`trace_id`/`span_id`)에 담아 Debezium EventRouter SMT로 Kafka 헤더에 실어 전파(감사로그 해시체인 계산 대상에서는 제외)
+- Maker-Checker(이중 승인, 4-eyes principle) — 금액 threshold 이상 이체는 `TransferMoneyController`에서 즉시 차단되고, 별도 기안(Maker)/승인(Checker) 절차(`TransferApprovalController`, `POST /api/v1/transfer-approvals`, `POST /{requestId}/approve`·`/reject`, `GET /{requestId}`로 거절 사유 등 상세 조회)를 거쳐야만 실제 자금 이동이 시작됨
 - 룰 기반 이상거래 탐지 (`FraudCheckPort`) — 단건 금액이 threshold를 초과하면 `SuspiciousTransferException`으로 이체를 즉시 차단. `TransferMoneyService.transfer()` 내부(기존 `@DistributedLock` 안쪽)에 위치해, 직접 이체(`TransferMoneyController`)와 Maker-Checker 승인 후 트리거(`ApproveTransferService`) 두 경로 모두에서 우회 없이 적용됨
 
 ### 트랙 2 — EOD 대규모 정산 배치

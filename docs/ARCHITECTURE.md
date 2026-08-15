@@ -23,7 +23,7 @@ com.fbrl
 │   └── service        # UseCase 구현체 (CreateAccountService, TransferSagaOrchestrator, VerifyAuditChainService, ...)
 ├── adapter
 │   ├── in
-│   │   ├── web         # AccountController, TransferMoneyController, AuditController, GlobalExceptionHandler
+│   │   ├── web         # AccountController, TransferMoneyController, TransferApprovalController, AuditController, GlobalExceptionHandler
 │   │   ├── kafka        # TransferEventConsumer, KafkaRetryTopicConfig
 │   │   ├── batch         # EodSettlementJobConfig, AccountItemReader/Processor/Writer
 │   │   └── scheduler      # EodSettlementScheduler
@@ -85,7 +85,7 @@ com.fbrl
 
 **선택 이유**: "같은 계좌 내 이벤트 순서"보다 "다른 계좌들의 처리량"을 지키는 쪽을 선택. `KafkaRetryTopicConfig`(`src/main/java/com/fbrl/adapter/in/kafka/KafkaRetryTopicConfig.java`)에서 `maxAttempts(4)` + 지수 백오프(1s→2s→4s..., 최대 30s)로 재시도하고, `NonRetryableEventProcessingException`을 상속한 결정론적 실패(`notRetryOn` + `traversingCauses`)는 재시도 없이 즉시 DLT로 라우팅.
 
-### 5. Kafka Retry Topic과 Resilience4j 서킷 브레이커의 역할 분리 — 이후 과제 8에서 서킷 브레이커 제거됨
+### 5. Kafka Retry Topic과 Resilience4j 서킷 브레이커의 역할 분리 — 이후 8번 결정에서 서킷 브레이커 제거됨
 
 **문제 상황**: Kafka 발행(`OutboxPollingScheduler` → `KafkaEventPublisherAdapter`)은 DB 트랜잭션 커밋 이후에 실행되는 post-commit 비동기 경로라, 실패해도 되돌릴 트랜잭션 자체가 없음. Consumer 측 재시도(4번 결정)와는 별개로 "Kafka 자체가 죽었는지"를 판단할 방법이 필요했음.
 
@@ -93,7 +93,7 @@ com.fbrl
 
 **선택 이유(당시)**: 배타적이지 않고 함께 사용. Retry Topic은 "이벤트 단위 재시도", 서킷 브레이커는 "Kafka 생사 판단 후 호출 자체를 차단"으로 역할을 나눔. `KafkaEventPublisherAdapter#publish()`(`adapter.out.messaging`)에 `@CircuitBreaker(name="kafkaEventPublisher", fallbackMethod="publishFallback")`를 적용했고, `fallbackMethod`는 실패를 삼키지 않고 항상 `EventPublishException`을 재던져 `PublishPendingOutboxEventsService`의 "실패 시 `markAsSent()` 호출 안 함" 계약을 보존.
 
-> 과제 8(PostgreSQL·Debezium CDC 전환)에서 Kafka 발행 자체가 애플리케이션 코드에서 사라지면서 이 문단이 설명하는 컴포넌트(`KafkaEventPublisherAdapter`, 서킷 브레이커 설정)는 모두 삭제됨. Retry Topic(4번 결정)은 Consumer 측 로직이라 그대로 유지.
+> 8번 결정(PostgreSQL·Debezium CDC 전환)에서 Kafka 발행 자체가 애플리케이션 코드에서 사라지면서 이 문단이 설명하는 컴포넌트(`KafkaEventPublisherAdapter`, 서킷 브레이커 설정)는 모두 삭제됨. Retry Topic(4번 결정)은 Consumer 측 로직이라 그대로 유지.
 
 ### 6. 낙관적 락 예외 catch 순서
 
@@ -109,7 +109,7 @@ com.fbrl
 
 **대안 비교**: 하나의 서비스 클래스 안에서 메서드만 분리 vs 별도 스프링 빈으로 분리.
 
-**선택 이유**: 별도 빈 분리만이 실제로 동작함. `AccountCreationExecutor`(`application.service`)는 `createInNewTransaction()`을 `@Transactional(REQUIRES_NEW)`로 별도 빈에 격리했고, `DistributedLockAspect`(`global.common.aop`)는 락 획득 후 실제 트랜잭션 실행을 별도 빈인 `AopForTransaction`에 위임. `@CircuitBreaker`도 한때 동일 원리로 `KafkaEventPublisherAdapter`에 적용해 검증했으나, 과제 8(PostgreSQL·Debezium CDC 전환)에서 발행 주체 자체가 애플리케이션에서 사라지면서 함께 제거됨.
+**선택 이유**: 별도 빈 분리만이 실제로 동작함. `AccountCreationExecutor`(`application.service`)는 `createInNewTransaction()`을 `@Transactional(REQUIRES_NEW)`로 별도 빈에 격리했고, `DistributedLockAspect`(`global.common.aop`)는 락 획득 후 실제 트랜잭션 실행을 별도 빈인 `AopForTransaction`에 위임. `@CircuitBreaker`도 한때 동일 원리로 `KafkaEventPublisherAdapter`에 적용해 검증했으나, 8번 결정(PostgreSQL·Debezium CDC 전환)에서 발행 주체 자체가 애플리케이션에서 사라지면서 함께 제거됨.
 
 ### 8. PostgreSQL 전환 및 Debezium CDC 도입 — 완료
 
@@ -203,7 +203,7 @@ com.fbrl
 - `global.config.FraudPolicyProperties`(`@ConfigurationProperties(prefix="fraud")`) / `FraudConfig` — `ApprovalPolicyProperties`/`ApprovalConfig`와 동형으로 `application.yaml`의 `fraud.threshold`를 `FraudPolicy` 빈으로 조립.
 - `ApproveTransferTriggersFraudCheckIntegrationTest`(`@SpringBootTest`)로 Mock 없이 승인 경로에서도 threshold 이상 금액이 실제로 차단되고 잔액이 이동하지 않는지 검증 — Maker-Checker 승인 게이트가 겪었던 우회 사고의 재발 방지 확인.
 
-> 이 결정과 과제 16(Maker-Checker) 사이의 PROGRESS.md 과제 번호(17~18)는 아직 별도 세션에서 복원 예정인 다른 완료 작업(PostgreSQL 전환, Debezium CDC 전환, 해시체인 감사로그)용으로 예약되어 있습니다. 자세한 내용은 [`PROGRESS.md`](./PROGRESS.md)의 "다음 작업 → 문서 부채" 항목을 참고하세요.
+> PROGRESS.md 기준으로 이 결정은 과제 21에 해당하며, 그 사이 과제 13~15(PostgreSQL 전환, Debezium CDC 전환, 해시체인 감사로그)와 과제 20(거절 사유 조회 API)도 함께 복원·기록되었습니다. 자세한 내용은 [`PROGRESS.md`](./PROGRESS.md)를 참고하세요.
 
 ---
 
