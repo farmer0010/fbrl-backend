@@ -133,4 +133,11 @@ public class GlobalExceptionHandler {
     return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
         .body(ErrorResponse.of("INTERNAL_SERVER_ERROR", "서버 내부 오류가 발생했습니다."));
   }
+
+  @ExceptionHandler(SuspiciousTransferException.class)
+  public ResponseEntity<ErrorResponse> handleSuspiciousTransferException(
+      SuspiciousTransferException e) {
+    return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+        .body(ErrorResponse.of("SUSPICIOUS_TRANSFER", e.getMessage()));
+  }
 }

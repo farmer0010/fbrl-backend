@@ -3,6 +3,7 @@ package com.fbrl.application.service;
 import com.fbrl.application.port.in.TransferMoneyCommand;
 import com.fbrl.application.port.in.TransferMoneyUseCase;
 import com.fbrl.application.port.out.AccountRepositoryPort;
+import com.fbrl.application.port.out.FraudCheckPort;
 import com.fbrl.application.port.out.PayloadSerializerPort;
 import com.fbrl.application.port.out.SaveLedgerEntryPort;
 import com.fbrl.application.port.out.SaveOutboxEventPort;
@@ -10,6 +11,7 @@ import com.fbrl.domain.event.TransferCompletedEvent;
 import com.fbrl.domain.exception.AccountNotFoundException;
 import com.fbrl.domain.exception.InsufficientBalanceException;
 import com.fbrl.domain.exception.ReservedAccountException;
+import com.fbrl.domain.exception.SuspiciousTransferException;
 import com.fbrl.domain.model.Account;
 import com.fbrl.domain.model.LedgerEntry;
 import com.fbrl.domain.model.LedgerEntry.LedgerEntryPair;
@@ -32,18 +34,21 @@ public class TransferMoneyService implements TransferMoneyUseCase {
   private final SaveLedgerEntryPort saveLedgerEntryPort;
   private final SaveOutboxEventPort saveOutboxEventPort;
   private final PayloadSerializerPort payloadSerializerPort;
+  private final FraudCheckPort fraudCheckPort;
 
   public TransferMoneyService(
       AccountRepositoryPort accountRepositoryPort,
       AccountBalanceCalculator accountBalanceCalculator,
       SaveLedgerEntryPort saveLedgerEntryPort,
       SaveOutboxEventPort saveOutboxEventPort,
-      PayloadSerializerPort payloadSerializerPort) {
+      PayloadSerializerPort payloadSerializerPort,
+      FraudCheckPort fraudCheckPort) {
     this.accountRepositoryPort = accountRepositoryPort;
     this.accountBalanceCalculator = accountBalanceCalculator;
     this.saveLedgerEntryPort = saveLedgerEntryPort;
     this.saveOutboxEventPort = saveOutboxEventPort;
     this.payloadSerializerPort = payloadSerializerPort;
+    this.fraudCheckPort = fraudCheckPort;
   }
 
   @Override
@@ -51,6 +56,7 @@ public class TransferMoneyService implements TransferMoneyUseCase {
   public void transfer(TransferMoneyCommand command) {
     assertNotReservedAccount(command.senderAccountNumber());
     assertNotReservedAccount(command.receiverAccountNumber());
+    assertNotSuspicious(command);
 
     Account senderAccount =
         accountRepositoryPort
@@ -102,6 +108,12 @@ public class TransferMoneyService implements TransferMoneyUseCase {
   private void assertNotReservedAccount(String accountNumber) {
     if (SystemAccounts.OPENING_BALANCE_SOURCE.equals(accountNumber)) {
       throw new ReservedAccountException("예약된 시스템 계좌는 이체 대상으로 사용할 수 없습니다. 계좌번호: " + accountNumber);
+    }
+  }
+
+  private void assertNotSuspicious(TransferMoneyCommand command) {
+    if (fraudCheckPort.isSuspicious(command.senderAccountNumber(), command.money())) {
+      throw new SuspiciousTransferException(command.senderAccountNumber(), command.money());
     }
   }
 }
