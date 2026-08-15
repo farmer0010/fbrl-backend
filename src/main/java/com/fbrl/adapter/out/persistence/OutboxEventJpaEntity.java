@@ -42,6 +42,12 @@ public class OutboxEventJpaEntity {
   @Column(name = "entry_hash", nullable = false, length = 64, unique = true)
   private String entryHash;
 
+  @Column(name = "trace_id", length = 32)
+  private String traceId;
+
+  @Column(name = "span_id", length = 16)
+  private String spanId;
+
   private OutboxEventJpaEntity(
       Long id,
       String aggregateType,
@@ -50,7 +56,9 @@ public class OutboxEventJpaEntity {
       String payload,
       Instant createdAt,
       String previousHash,
-      String entryHash) {
+      String entryHash,
+      String traceId,
+      String spanId) {
 
     this.id = id;
     this.aggregateType = aggregateType;
@@ -60,6 +68,8 @@ public class OutboxEventJpaEntity {
     this.createdAt = createdAt;
     this.previousHash = previousHash;
     this.entryHash = entryHash;
+    this.traceId = traceId;
+    this.spanId = spanId;
   }
 
   static OutboxEventJpaEntity fromDomain(OutboxEvent outboxEvent) {
@@ -71,11 +81,22 @@ public class OutboxEventJpaEntity {
         outboxEvent.getPayload(),
         outboxEvent.getCreatedAt(),
         outboxEvent.getPreviousHash(),
-        outboxEvent.getEntryHash());
+        outboxEvent.getEntryHash(),
+        outboxEvent.getTraceId(),
+        outboxEvent.getSpanId());
   }
 
   OutboxEvent toDomain() {
     return new OutboxEvent(
-        id, aggregateType, aggregateId, eventType, payload, createdAt, previousHash, entryHash);
+        id,
+        aggregateType,
+        aggregateId,
+        eventType,
+        payload,
+        createdAt,
+        previousHash,
+        entryHash,
+        traceId,
+        spanId);
   }
 }

@@ -22,6 +22,7 @@
     "transforms.outbox.table.field.event.key": "aggregate_id",
     "transforms.outbox.table.field.event.type": "event_type",
     "transforms.outbox.table.field.event.payload": "payload",
-    "transforms.outbox.route.topic.replacement": "transfer-events"
+    "transforms.outbox.route.topic.replacement": "transfer-events",
+    "transforms.outbox.table.fields.additional.placement": "trace_id:header:trace_id,span_id:header:span_id"
   }
 }

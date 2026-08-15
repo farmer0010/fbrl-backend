@@ -371,12 +371,46 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 - 신규 8개(`LedgerEntryTest`, `AccountBalanceCalculatorTest`, `VerifyTrialBalanceServiceTest`, `TrialBalanceVerificationTaskletTest`, `OpeningBalanceMigrationServiceTest`, `TransferMoneyServiceTest`의 예약 계좌 가드 테스트 2종 포함) + 기존 `balance` API 변경에 따른 11개 파일 수정.
 - 전체 테스트(`./gradlew test`) 61개 통과, `./gradlew spotlessCheck` 통과.
 
+### 과제 14: 분산 트레이싱(OpenTelemetry) 도입 (완료)
+
+브랜치: `feat/opentelemetry-tracing` → `develop` (PR #35)
+
+**배경**
+
+- Saga(REQUIRES_NEW로 분리된 여러 빈) + Outbox 저장 + Debezium CDC + Kafka Consumer(재시도 토픽 포함)를 거치는 하나의 이체 요청에서 장애 발생 지점을 추적할 방법이 없었음. Micrometer Tracing(OTel bridge)으로 요청 시작부터 Consumer 처리까지 하나의 trace로 연결하는 것이 목표.
+- 코드 작성 전 4가지 설계 결정(계측 방식 / Outbox→Kafka context 전파 방법 / trace_id를 entryHash에 포함할지 / Exporter 목적지)을 옵션+트레이드오프로 먼저 보고하고 사용자 확정 후 구현.
+
+**설계 결정**
+
+1. **계측 방식 — Micrometer Tracing (OTel bridge)**: Boot 4.0.7 네이티브 스택(`spring-boot-starter-opentelemetry`)과 정합적이고, `spring-boot-starter-aspectj`와도 자연스럽게 결합. 다만 실제 구현 단계에서 애초 근거로 들었던 `@Observed` 선언적 계측 대신 `Tracer` API로 span을 수동 생성하는 쪽으로 방향을 바꿈 — 이유는 (a) `DepositParticipantPort.deposit()`이 실제 입금과 보상 트랜잭션 두 지점에서 호출되는데 `@Observed`는 정적 애노테이션이라 같은 메서드의 두 호출을 다른 span 이름으로 구분할 수 없었고, (b) `Tracer`로 직접 감싸면 AOP 프록시 자체를 타지 않아 self-invocation 리스크 카테고리가 통째로 사라지는 부수효과가 있었기 때문. `@Observed`의 선언적 간결함은 포기한 트레이드오프.
+2. **Outbox → Debezium CDC → Kafka Consumer 구간 trace context 전파 — 전용 컬럼**: `outbox_event`에 `trace_id`/`span_id` 컬럼을 추가하고 Debezium Outbox EventRouter SMT의 `table.fields.additional.placement`로 Kafka 헤더에 실어 전달, Consumer가 W3C traceparent 형식(`00-{traceId}-{spanId}-01`)으로 재구성해 `Propagator.extract()`로 부모 span을 복원. payload JSON 필드에 넣는 방식(옵션 a)은 entryHash 계산 입력에 payload가 포함되므로 자동으로 옵션 3을 "포함"으로 강제하게 되는 문제가 있어 기각.
+3. **entryHash 계산에 trace_id 제외**: 감사로그(entryHash)는 업무적 사실 변조 여부를 증명하는 무결성 대상이고, 트레이스 ID는 샘플링/인프라 설정에 따라 달라질 수 있는 관측성 메타데이터라 목적이 다름 — `OutboxEvent.withTraceContext()`는 entryHash 계산 이후에만 적용해 분리.
+4. **Exporter 목적지 — 로컬은 Jaeger, 배포 환경은 Infra 협의 필요**: docker-compose에 Jaeger all-in-one(OTLP 수신) 추가해 즉시 로컬 검증 가능하게 구성. 실제 배포 환경 Prometheus/Grafana 스택과 연동할 OTLP Collector 엔드포인트는 Infra 담당(김준희)과 별도 협의 필요 — 아직 미정.
+
+**검증 (리뷰에서 지적받아 추가로 확인)**
+
+- 자동 리뷰에서 "Debezium이 실제로 DB 컬럼을 Kafka 헤더로 옮겨주는지는 `outbox-connector.json` 설정 파일 하나만 믿고 있는 상태"라는 지적을 받아, 로컬에 Jaeger + Kafka Connect를 직접 띄우고 커넥터를 등록한 뒤 실제 이체 1건을 실행해 확인함:
+  - `outbox_event` 테이블에 저장된 `trace_id`/`span_id`가 `kafka-console-consumer --property print.headers=true`로 읽은 실제 `transfer-events` 메시지 헤더 값과 정확히 일치.
+  - Jaeger UI(`http://localhost:16686`)에서 `http post /api/v1/transfers` → `outbox.save` → `transfer-event.consume` 3개 span이 동일 trace_id로 연결됨을 실물로 확인. `transfer-event.consume` span은 이후 발견된 `Money` VO Jackson 역직렬화 실패(아래 참고)로 `otel.status_code=ERROR` + 예외 스택트레이스가 함께 기록됨 — 트레이싱이 실제 장애 지점을 정확히 짚어주는 것도 같이 확인됨.
+  - 다만 이 확인은 수동 검증이며, 자동화된 통합 테스트(`TransferTraceContinuityIntegrationTest`)는 여전히 `TransferEventConsumer.consume()`을 직접 호출하는 방식이라 Debezium 라우팅 자체는 커버하지 않음 — 기존에 이미 보류 처리된 "실제 Kafka 브로커 기반 통합 테스트" 항목과 같은 종류의 갭이라 다음 작업 backlog에 병기.
+
+**부수 발견 (이번 작업 범위 밖, 미수정)**
+
+- `Money` VO(`domain.model`)에 Jackson creator가 없어 `TransferCompletedEvent`(payload에 `Money` 포함) 실제 역직렬화가 항상 실패함. 기존 테스트가 전부 Mock 기반(`PayloadDeserializerPort`를 목으로 대체)이라 지금까지 드러나지 않았던 것으로 보임 — 실제 배포 환경이라면 `transfer-events` 토픽 메시지가 전부 재시도 후 DLT로 빠지고 있었을 가능성. 별도 이슈로 다뤄야 함.
+
+**테스트**
+
+- 신규 3개(`OutboxPersistenceAdapterTest`, `TransferSagaOrchestratorTest`, `TransferTraceContinuityIntegrationTest`) + 기존 2개(`OutboxEventTest`, `TransferEventConsumerTest`) 확장.
+- 전체 테스트(`./gradlew test`) 78개 통과, `./gradlew spotlessCheck` 통과.
+
 ## 🚧 다음 작업
 
 - 트랙 3(장애 복구 & 카오스 엔지니어링) 두 과제(Kafka DLQ, Resilience4j) 완료 — 3개 트랙(실시간 트랜잭션/EOD 배치/장애복구) 모두 핵심 구현 최소 1개 이상 완료.
 - (협업 필요) Chaos Mesh 인프라 결함 주입 — 노션 "프로젝트 개요"상 Infra(김준희) 담당 업무. 백엔드가 처음부터 CRD/클러스터까지 다 짜는 게 아니라, "어떤 장애 시나리오로 무엇(서킷 브레이커/재시도 등)을 검증할지"를 먼저 정의해 인프라 담당자와 공유하고, 실제 장애 주입 후 애플리케이션 반응을 검증하는 역할 분담으로 진행할 것
 - (보류) 실제 Kafka 브로커 기반 재시도 토픽 → DLT 라우팅 통합 테스트 (과제 11에서 범위 분리)
 - (보류) 실제 Kafka 브로커 E2E 수동 검증
+- (보류) Debezium EventRouter SMT의 `table.fields.additional.placement`(trace_id/span_id 헤더 라우팅)를 커버하는 자동화된 통합 테스트 — 위 두 항목과 같은 이유(실제 Kafka 브로커 필요)로 보류, 현재는 로컬 수동 검증으로만 확인됨(과제 14 참고)
+- (권장) `Money` VO에 Jackson creator 부재로 `TransferCompletedEvent` 실제 역직렬화가 항상 실패하는 버그 수정 (과제 14에서 발견, 별도 이슈로 다룰 것)
 - (보류) Testcontainers 기반 통합 테스트 재검증 — 프로젝트 전체가 docker-compose 기반 통합 테스트 컨벤션을 일관되게 쓰고 있어 현재는 도입 보류로 결정(Testcontainers는 이 컨벤션과 공존 시 일관성이 깨짐, YAGNI)
 - (권장) 실제 배포 대상 Postgres에 `accounts.balance` 컬럼 등 orphan 컬럼이 남아있다면 `ALTER TABLE ... DROP COLUMN`으로 별도 정리 필요(과제 13 참고, 이 프로젝트는 Flyway/Liquibase 미사용)
 
@@ -418,6 +452,7 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 - IntelliJ가 `@SpringBatchTest`로 런타임에 동적 등록되는 빈(`JobOperatorTestUtils` 등)을 정적 분석으로 못 쫓아가 "오토와이어링 불가" 오탐을 낼 수 있음 — 에디터 빨간줄보다 실제 테스트 실행 결과를 우선 신뢰할 것
 - 프로덕션 코드는 `JobOperator.start(Job, JobParameters)` 사용(JobLauncher는 6.0부터 deprecated, 6.2+ 제거 예정). 관련 예외(`JobInstanceAlreadyCompleteException` 등)는 `org.springframework.batch.core.launch` 패키지(JobOperator와 동일 패키지)
 - ShedLock 공식 프로바이더 중 Redisson 전용은 없음 — Redisson을 쓰는 프로젝트라도 spring-boot-starter-data-redis가 자동 구성해주는 `RedisConnectionFactory` 기반 `shedlock-provider-redis-spring`을 사용
+- `TransferEventConsumer`가 Kafka 헤더의 `trace_id`/`span_id`로 W3C traceparent를 조립할 때 sampled flag를 `"01"`(항상 샘플됨)로 하드코딩(`SAMPLED_TRACE_FLAGS`) — 현재 `management.tracing.sampling.probability: 1.0`(100% 샘플링)이라 드러나지 않지만, 나중에 샘플링 확률을 낮추면 producer 쪽에서 "샘플링 안 함"으로 결정한 trace도 consumer가 무조건 "샘플됨"으로 강제 복원하게 됨. 샘플링 확률을 조정할 때는 이 하드코딩도 함께 수정 필요(sampled 여부를 별도 컬럼/헤더로 전달하거나 span context의 실제 sampled 상태를 반영하도록 변경)
 - Mockito 가짜 객체도 원본 인터페이스의 checked exception 시그니처를 그대로 물려받음 — `verify(mock).method()`에서도 그 예외 처리가 필요할 수 있음
 - K8s Lease API의 리더 선출도 낙관적 락(resourceVersion) 기반 — JPA `@Version` 충돌 처리와 동일한 사고방식으로 접근 가능. 다만 Split-Brain(옛 리더가 죽은 게 아니라 응답만 지연된 경우 짧게 리더가 둘로 보이는 상황) 위험은 DB 유니크 제약 같은 최후 방어선과는 별개로 반드시 고려해야 함 — 유니크 제약은 저장 단계의 중복만 막을 뿐, 그 전 단계(읽기/계산)의 자원 낭비는 못 막음
 - `@Bean` 팩토리 메서드가 unchecked exception(`IllegalStateException` 등)을 던질 수 있음 — 특정 checked exception(`IOException` 등)만 잡도록 catch를 좁게 설계하면 실제 라이브러리가 던지는 예외를 못 잡을 수 있으니, "외부 인프라 감지 후 폴백"처럼 의도가 명확한 방어 로직에서는 `Exception`으로 넓게 잡는 것이 오히려 올바른 설계일 수 있음(무분별한 예외 은폐와는 구분할 것 — 로그를 남기고 명시적으로 대체 경로로 전환하는 경우에 한함)
