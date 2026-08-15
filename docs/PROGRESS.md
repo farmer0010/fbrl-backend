@@ -450,7 +450,7 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 1. **배치 — 전용 애그리게이트(`TransferApprovalRequest`) + 승인 완료 시 `TransferMoneyUseCase` 트리거**: "바뀌는 이유가 다르면 분리한다"는 기존 SRP 판단 기준(과제 8 `InterestPolicy`/`EodSnapshot` 분리, 과제 13 `LedgerEntry`/`Account` 분리와 동일 논리)을 적용 — 승인 정책이 바뀌는 이유와 이체 실행 메커니즘이 바뀌는 이유는 다름. `StartTransferSagaUseCase`가 아닌 실제 프로덕션 경로인 `TransferMoneyUseCase`를 트리거 대상으로 선택(위 "배경"의 발견 사항 반영).
 2. **승인 조건 — 금액 threshold + 도메인 정책 객체(`ApprovalPolicy` record)**: `InterestPolicy`와 동일하게 도메인 계층에 정책을 두되, threshold 값 자체는 `application.yaml`(`approval.threshold`)에서 `ApprovalPolicyProperties`(`@ConfigurationProperties`)로 읽어 `ApprovalConfig`가 `ApprovalPolicy` 빈으로 조립.
 3. **신원 표현 — makerId/checkerId 단순 String + 자기승인 방지는 도메인 모델 내부**: 이 프로젝트가 계좌번호도 항상 raw String으로 표현하는 컨벤션과 일치시킴. `TransferApprovalRequest.approve()/reject()` 내부에서 `checkerId.equals(makerId)`를 검증해 `SelfApprovalNotAllowedException`을 던짐 — `LedgerEntry.transferPair`가 두 다리에 동일 `Money` 인스턴스를 강제해 불변식을 원천 차단하는 것과 동일한 invariant-by-construction 사고방식.
-4. **거절 처리 — `rejectionReason` 필드 추가(필수)**: 해시체인 감사로그(과제 9)·OpenTelemetry(과제 14) 등 감사 추적성에 강하게 투자해온 프로젝트 컨벤션과 일치, 4-eyes principle 자체가 규제 대응 목적이라 "왜 거절했는지" 없는 감사 기록은 실효성이 떨어짐.
+4. **거절 처리 — `rejectionReason` 필드 추가(필수)**: 해시체인 감사로그(⚠️ 섹션 미작성 — 아래 '다음 작업' 참고)·OpenTelemetry(과제 14) 등 감사 추적성에 강하게 투자해온 프로젝트 컨벤션과 일치, 4-eyes principle 자체가 규제 대응 목적이라 "왜 거절했는지" 없는 감사 기록은 실효성이 떨어짐.
 
 **부가 판단 (짧게 언급 후 구현)**
 
@@ -490,6 +490,7 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 - (보류) Debezium EventRouter SMT의 `table.fields.additional.placement`(trace_id/span_id 헤더 라우팅)를 커버하는 자동화된 통합 테스트 — 위 두 항목과 같은 이유(실제 Kafka 브로커 필요)로 보류, 현재는 로컬 수동 검증으로만 확인됨(과제 14 참고)
 - (보류) Testcontainers 기반 통합 테스트 재검증 — 프로젝트 전체가 docker-compose 기반 통합 테스트 컨벤션을 일관되게 쓰고 있어 현재는 도입 보류로 결정(Testcontainers는 이 컨벤션과 공존 시 일관성이 깨짐, YAGNI)
 - (권장) 실제 배포 대상 Postgres에 `accounts.balance` 컬럼 등 orphan 컬럼이 남아있다면 `ALTER TABLE ... DROP COLUMN`으로 별도 정리 필요(과제 13 참고, 이 프로젝트는 Flyway/Liquibase 미사용)
+- (문서 부채) PostgreSQL 전환/Debezium CDC 전환/해시체인 감사로그 3개 섹션이 실제 코드는 merge됐으나(커밋 de77994, 506ec45, c24411c) PROGRESS.md 갱신 커밋이 누락되어 문서에 없음 — 별도 세션에서 커밋 diff 기반으로 복원 필요
 
 ## 🤖 AI 에이전트(Claude Code) 활용 방침
 
