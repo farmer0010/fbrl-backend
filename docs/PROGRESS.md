@@ -344,7 +344,7 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 - `build.gradle`: MariaDB 드라이버 → `org.postgresql:postgresql` JDBC 드라이버 교체.
 - `docker-compose.yml`: `mariadb` 서비스 → `postgres`(`wal_level=logical` 설정 포함) 서비스로 교체.
 - `application.yaml`: `spring.datasource.url`/`driver-class-name`/`spring.jpa.database-platform`을 PostgreSQL 기준으로 변경.
-- AUTO_INCREMENT/IDENTITY 채번 전략, 테이블/컬럼 네이밍, 기존 JPA 락 사용 방식(`@Version`, `@Lock`)이 두 DB에서 동일하게 동작함을 확인 — 도메인 계층은 변경 없음(헥사고날 구조상 인프라 어댑터 교체만으로 DB 전환이 끝남을 실증).
+- AUTO_INCREMENT/IDENTITY 채번 전략, 테이블/컬럼 네이밍, 기존 JPA 락 사용 방식(`@Version`, `@Lock`)이 두 DB에서 동일하게 동작함을 확인 — 도메인 계층은 변경 없음(헥사고날 구조상 인프라 어댑터 교체만으로 DB 전환이 끝남).
 - 전체 테스트(`./gradlew test`) 통과 확인.
 
 ### 과제 14: Outbox Polling → Debezium CDC 전환 (완료)
@@ -571,10 +571,10 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 
 **배경**
 
-- 단건 금액이 threshold를 넘으면 이상거래로 의심해 이체를 즉시 차단하는 최소 스코프 룰 엔진 도입. 착수 전 기존 메모("Saga 흐름 중 어디에 끼울지가 쟁점")를 그대로 믿지 않고 실제 코드로 라이브 이체 경로를 재확인 — `TransferSagaOrchestrator`/`StartTransferSagaUseCase`는 여전히 컨트롤러가 없어 웹에 연결되지 않은 상태이고, 실제 라이브 경로는 `TransferMoneyController → TransferMoneyService`(과제 19와 동일 결론)임을 재확인.
-- `TransferMoneyController`에 걸린 Maker-Checker 승인 게이트(`assertApprovalNotRequired()`)를 `ApproveTransferService`가 컨트롤러를 거치지 않고 `TransferMoneyUseCase`를 직접 호출해 우회하는 구조(과제 19 "심각한 게이트 누락 발견 및 수정" 사례)를 먼저 파악한 뒤, "이상거래 탐지는 승인 경로에서도 빠짐없이 적용돼야 한다"(과제 19의 승인 게이트와 반대로, 이번엔 우회되면 안 되는 로직)는 것을 설계 기준에 명시적으로 포함.
+- 단건 금액이 threshold를 넘으면 이상거래로 의심해 이체를 즉시 차단하는 최소 스코프 룰 엔진 도입. 기존 메모("Saga 흐름 중 어디에 끼울지가 쟁점")는 전제가 낡아 있어, 착수 전 실제 코드로 라이브 이체 경로부터 재확인 — `TransferSagaOrchestrator`/`StartTransferSagaUseCase`는 여전히 컨트롤러가 없어 웹에 연결되지 않았고, 라이브 경로는 `TransferMoneyController → TransferMoneyService`(과제 19와 동일 결론).
+- `TransferMoneyController`에 걸린 Maker-Checker 승인 게이트(`assertApprovalNotRequired()`)를 `ApproveTransferService`가 컨트롤러를 거치지 않고 `TransferMoneyUseCase`를 직접 호출해 우회하는 구조(과제 19 "심각한 게이트 누락 발견 및 수정" 사례)를 먼저 파악. 이상거래 탐지는 반대로 승인 경로에서도 빠짐없이 적용돼야 하므로(과제 19의 승인 게이트와 정반대 요구사항), 이 점을 설계 기준에 반영.
 
-**설계 결정 (옵션 제시 → 사용자 확정)**
+**설계 결정**
 
 1. **위치 — `TransferMoneyService.transfer()` 내부(`assertNotReservedAccount`와 같은 위치대)**: 컨트롤러/AOP 옵션도 함께 제시했으나, 두 이체 진입점(`TransferMoneyController`, `ApproveTransferService`)이 유일하게 공유하는 지점이 이 메서드뿐이라 여기 두어야만 승인 경로도 구조적으로 커버됨. 이미 `@DistributedLock(key = "#command.senderAccountNumber")`가 걸려 있어, 향후 "짧은 시간 내 다건" 같은 카운팅 룰을 추가해도 신규 락 없이 기존 락에 편승 가능하다는 점도 이 위치를 선택한 근거.
 2. **판정 실패 처리 — 도메인 예외(`SuspiciousTransferException`) 즉시 던지기**: 별도 상태(심사 대기)로 전이하는 옵션도 제시했으나, 최소 스코프에서는 기존 도메인예외+`GlobalExceptionHandler` 컨벤션과 완전히 일치하는 예외 방식을 채택. 오탐 대응이 필요해지면 Maker-Checker의 `PENDING` 패턴을 재사용해 확장하는 것으로 미룸(YAGNI).
@@ -591,10 +591,10 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 - `GlobalExceptionHandler`에 `SuspiciousTransferException` → 400(`SUSPICIOUS_TRANSFER`) 매핑 추가.
 - `application.yaml`: `fraud.threshold: 50000000` 추가(기존 `approval.threshold: 10000000`과 별개 값).
 
-**리뷰에서 지적된 설계 이탈 및 재작업**
+**FraudPolicy 도메인 계층 누락 및 재작업 (사용자 리뷰에서 지적됨)**
 
-- 최초 구현은 임계치 비교 로직(`amount.isGreaterThanOrEqual(threshold)`)을 `RuleBasedFraudCheckAdapter`(adapter.out.fraud, 인프라 계층) 안에 직접 박아 넣었음 — 스스로 사전에 "`ApprovalPolicy`와 동형인 `domain.model.FraudPolicy`로 시작하겠다"고 설계안에서 제안해놓고 구현 단계에서 이를 지키지 않은 것을 사용자 리뷰로 지적받음(과제 19 "심각한 게이트 누락 발견 및 수정"과 같은 종류의 사례 — 리뷰가 diff와 사전 설계안을 대조해 이탈을 잡아냄).
-- 문제의 핵심: "무엇이 의심거래인가"(임계치 룰)라는 업무 규칙 자체가 어댑터 소유가 되면, 나중에 어댑터를 외부 룰엔진으로 교체할 때 이 규칙까지 같이 사라짐. `FraudConfig`가 `Money` 타입 자체를 Spring 빈으로 노출한 것도, 향후 다른 `Money` 타입 빈이 추가되면 `NoUniqueBeanDefinitionException`으로 이어질 수 있는 잠재 결함으로 지적됨.
+- 설계안에서는 `ApprovalPolicy`와 동형인 `domain.model.FraudPolicy`로 시작하기로 했으나, 최초 구현은 임계치 비교 로직(`amount.isGreaterThanOrEqual(threshold)`)을 `RuleBasedFraudCheckAdapter`(adapter.out.fraud, 인프라 계층)에 직접 작성 — 사전 설계안과 diff를 대조한 사용자 리뷰로 지적됨(과제 19 "심각한 게이트 누락 발견 및 수정"과 같은 종류의 사례).
+- "무엇이 의심거래인가"(임계치 룰)라는 업무 규칙이 어댑터 소유가 되면, 나중에 어댑터를 외부 룰엔진으로 교체할 때 이 규칙까지 같이 사라짐. `FraudConfig`가 `Money` 타입 자체를 Spring 빈으로 노출한 것도, 향후 다른 `Money` 타입 빈이 추가되면 `NoUniqueBeanDefinitionException`으로 이어질 수 있는 잠재 결함으로 함께 지적됨.
 - 수정: `domain.model.FraudPolicy(Money threshold)`(record, `isSuspicious(Money amount)`) 신설 — `RuleBasedFraudCheckAdapter`는 이제 이 정책 객체에 위임만 함. `FraudConfig`도 `Money` 빈 대신 `FraudPolicy` 빈을 등록하도록 교체.
 
 **테스트**
