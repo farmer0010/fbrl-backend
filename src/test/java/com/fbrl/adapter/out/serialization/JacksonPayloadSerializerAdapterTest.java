@@ -3,7 +3,10 @@ package com.fbrl.adapter.out.serialization;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.fbrl.domain.event.TransferCompletedEvent;
 import com.fbrl.domain.exception.PayloadDeserializationException;
+import com.fbrl.domain.model.Money;
+import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -28,6 +31,20 @@ class JacksonPayloadSerializerAdapterTest {
 
     String json = adapter.serialize(original);
     SamplePayload restored = adapter.deserialize(json, SamplePayload.class);
+
+    assertThat(restored).isEqualTo(original);
+  }
+
+  @Test
+  @DisplayName(
+      "Mock 없이 실제 JsonMapper로 Money를 포함한 TransferCompletedEvent를 직렬화-역직렬화하면 원본과 동일하게 복원된다.")
+  void serializeThenDeserialize_transferCompletedEventWithMoney_roundTrip() {
+    TransferCompletedEvent original =
+        new TransferCompletedEvent(
+            "1000-01", "1000-02", Money.wons(50_000), Instant.parse("2026-08-15T00:00:00Z"));
+
+    String json = adapter.serialize(original);
+    TransferCompletedEvent restored = adapter.deserialize(json, TransferCompletedEvent.class);
 
     assertThat(restored).isEqualTo(original);
   }
