@@ -651,6 +651,7 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 
 ## 🚧 다음 작업
 
+- (보류) 승인은 됐으나 집행(실제 이체) 실패한 건의 재시도 정책 — `fix/decouple-approval-status-from-execution-result`에서 `TransferApprovalRequest.executionStatus`(NOT_APPLICABLE/EXECUTED/FAILED)로 "승인 행위"와 "집행 결과"를 분리했지만, `executionStatus=FAILED`로 남은 건을 재시도시킬 API/운영 절차는 이번 스코프에서 의도적으로 제외(YAGNI). 재시도 API 필요 시: 같은 요청을 다시 집행할지, 아니면 신규 승인 요청을 처음부터 다시 만들게 할지부터 결정 필요.
 - 트랙 3(장애 복구 & 카오스 엔지니어링) 두 과제(Kafka DLQ, Resilience4j) 완료 — 3개 트랙(실시간 트랜잭션/EOD 배치/장애복구) 모두 핵심 구현 최소 1개 이상 완료.
 - (협업 필요) Chaos Mesh 인프라 결함 주입 — 노션 "프로젝트 개요"상 Infra(김준희) 담당 업무. 백엔드가 처음부터 CRD/클러스터까지 다 짜는 게 아니라, "어떤 장애 시나리오로 무엇(서킷 브레이커/재시도 등)을 검증할지"를 먼저 정의해 인프라 담당자와 공유하고, 실제 장애 주입 후 애플리케이션 반응을 검증하는 역할 분담으로 진행할 것
 - (보류) 실제 Kafka 브로커 기반 재시도 토픽 → DLT 라우팅 통합 테스트 (과제 11에서 범위 분리)

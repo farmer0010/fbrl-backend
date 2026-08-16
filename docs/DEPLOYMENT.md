@@ -39,6 +39,22 @@ Spring Boot의 환경변수 relaxed binding은 `.`과 `-` 둘 다 단어 경계�
 | `K8S_LEADER_ELECTION_RENEW_DEADLINE_SECONDS` | `k8s.leader-election.renew-deadline-seconds` | `10` | 필수 아님 | N/A(`enabled=false`면 미사용) | 상동 |
 | `K8S_LEADER_ELECTION_RETRY_PERIOD_SECONDS` | `k8s.leader-election.retry-period-seconds` | `2` | 필수 아님 | N/A(`enabled=false`면 미사용) | 상동 |
 
+## 스키마 변경이 포함된 배포
+
+이 프로젝트는 Flyway/Liquibase 같은 마이그레이션 도구를 쓰지 않고, `ddl-auto: validate` 기본값을 전제로 스키마는 배포 담당자가 수동으로 맞춰야 합니다(로컬 `test`/`bootRun` 태스크만 `ddl-auto=update`로 오버라이드되어 있어 로컬에서는 자동으로 맞춰지지만, 이 오버라이드는 프로덕션에는 적용되지 않습니다).
+
+- **`fix/decouple-approval-status-from-execution-result`(승인 상태와 집행 결과 분리)** — `transfer_approval_requests` 테이블에 컬럼 2개 추가 포함:
+  - `execution_status VARCHAR(255) NOT NULL` — 기존 행이 있는 테이블에 `NOT NULL` 컬럼을 한 번에 추가하면 실패하므로, 배포 시 아래 순서로 적용할 것:
+    ```sql
+    ALTER TABLE transfer_approval_requests ADD COLUMN execution_status VARCHAR(255) NOT NULL DEFAULT 'NOT_APPLICABLE';
+    ALTER TABLE transfer_approval_requests ALTER COLUMN execution_status DROP DEFAULT;
+    ```
+  - `execution_failure_reason VARCHAR(255)` — nullable이라 단순 `ADD COLUMN`으로 충분:
+    ```sql
+    ALTER TABLE transfer_approval_requests ADD COLUMN execution_failure_reason VARCHAR(255);
+    ```
+  - 배포 전 이 DDL을 프로덕션 DB에 먼저 적용하지 않으면, 새 애플리케이션 버전은 `ddl-auto: validate`가 스키마 불일치를 즉시 감지해 기동 자체가 실패합니다(loud) — 데이터 정합성보다는 기동 실패로 먼저 드러나는 종류의 변경.
+
 ## 인프라 팀과 협의 필요한 별도 항목
 
 아래는 코드 수정 없이, 배포 준비도 감사에서 확인된 사실만 그대로 옮긴 목록입니다.

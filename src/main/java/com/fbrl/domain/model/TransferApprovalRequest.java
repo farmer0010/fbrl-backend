@@ -18,6 +18,8 @@ public class TransferApprovalRequest {
   private final Money amount;
   private ApprovalStatus status;
   private String rejectionReason;
+  private ExecutionStatus executionStatus;
+  private String executionFailureReason;
   private final Instant requestedAt;
   private Instant decidedAt;
   private final Long version;
@@ -32,6 +34,8 @@ public class TransferApprovalRequest {
       Money amount,
       ApprovalStatus status,
       String rejectionReason,
+      ExecutionStatus executionStatus,
+      String executionFailureReason,
       Instant requestedAt,
       Instant decidedAt,
       Long version) {
@@ -44,6 +48,8 @@ public class TransferApprovalRequest {
     this.amount = amount;
     this.status = status;
     this.rejectionReason = rejectionReason;
+    this.executionStatus = executionStatus;
+    this.executionFailureReason = executionFailureReason;
     this.requestedAt = requestedAt;
     this.decidedAt = decidedAt;
     this.version = version;
@@ -71,6 +77,8 @@ public class TransferApprovalRequest {
         amount,
         ApprovalStatus.PENDING,
         null,
+        ExecutionStatus.NOT_APPLICABLE,
+        null,
         now,
         null,
         null);
@@ -86,6 +94,8 @@ public class TransferApprovalRequest {
       Money amount,
       ApprovalStatus status,
       String rejectionReason,
+      ExecutionStatus executionStatus,
+      String executionFailureReason,
       Instant requestedAt,
       Instant decidedAt,
       Long version) {
@@ -99,6 +109,8 @@ public class TransferApprovalRequest {
         amount,
         status,
         rejectionReason,
+        executionStatus,
+        executionFailureReason,
         requestedAt,
         decidedAt,
         version);
@@ -122,6 +134,17 @@ public class TransferApprovalRequest {
     this.checkerId = checkerId;
     this.rejectionReason = rejectionReason;
     this.decidedAt = Instant.now();
+  }
+
+  public void markExecuted() {
+    this.executionStatus = ExecutionStatus.EXECUTED;
+    this.executionFailureReason = null;
+  }
+
+  public void markExecutionFailed(String reason) {
+    Objects.requireNonNull(reason, "실행 실패 사유는 필수입니다.");
+    this.executionStatus = ExecutionStatus.FAILED;
+    this.executionFailureReason = reason;
   }
 
   private void assertNotSelfApproval(String checkerId) {
@@ -171,6 +194,14 @@ public class TransferApprovalRequest {
 
   public String getRejectionReason() {
     return rejectionReason;
+  }
+
+  public ExecutionStatus getExecutionStatus() {
+    return executionStatus;
+  }
+
+  public String getExecutionFailureReason() {
+    return executionFailureReason;
   }
 
   public Instant getRequestedAt() {

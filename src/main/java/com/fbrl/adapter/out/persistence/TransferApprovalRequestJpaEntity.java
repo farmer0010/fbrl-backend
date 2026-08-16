@@ -1,6 +1,7 @@
 package com.fbrl.adapter.out.persistence;
 
 import com.fbrl.domain.model.ApprovalStatus;
+import com.fbrl.domain.model.ExecutionStatus;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -46,6 +47,13 @@ public class TransferApprovalRequestJpaEntity {
   @Column(name = "rejection_reason")
   private String rejectionReason;
 
+  @Enumerated(EnumType.STRING)
+  @Column(name = "execution_status", nullable = false)
+  private ExecutionStatus executionStatus;
+
+  @Column(name = "execution_failure_reason")
+  private String executionFailureReason;
+
   @Column(name = "requested_at", nullable = false)
   private Instant requestedAt;
 
@@ -66,6 +74,8 @@ public class TransferApprovalRequestJpaEntity {
       BigDecimal amount,
       ApprovalStatus status,
       String rejectionReason,
+      ExecutionStatus executionStatus,
+      String executionFailureReason,
       Instant requestedAt,
       Instant decidedAt,
       Long version) {
@@ -78,6 +88,8 @@ public class TransferApprovalRequestJpaEntity {
     this.amount = amount;
     this.status = status;
     this.rejectionReason = rejectionReason;
+    this.executionStatus = executionStatus;
+    this.executionFailureReason = executionFailureReason;
     this.requestedAt = requestedAt;
     this.decidedAt = decidedAt;
     this.version = version;
@@ -117,6 +129,14 @@ public class TransferApprovalRequestJpaEntity {
 
   public String getRejectionReason() {
     return rejectionReason;
+  }
+
+  public ExecutionStatus getExecutionStatus() {
+    return executionStatus;
+  }
+
+  public String getExecutionFailureReason() {
+    return executionFailureReason;
   }
 
   public Instant getRequestedAt() {

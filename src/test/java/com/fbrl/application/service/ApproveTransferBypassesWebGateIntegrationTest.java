@@ -9,6 +9,8 @@ import com.fbrl.adapter.out.persistence.LedgerEntryPersistenceAdapter;
 import com.fbrl.application.port.in.ApproveTransferUseCase.ApproveTransferCommand;
 import com.fbrl.application.port.out.SaveLedgerEntryPort;
 import com.fbrl.domain.model.Account;
+import com.fbrl.domain.model.ApprovalStatus;
+import com.fbrl.domain.model.ExecutionStatus;
 import com.fbrl.domain.model.LedgerDirection;
 import com.fbrl.domain.model.LedgerEntry;
 import com.fbrl.domain.model.Money;
@@ -68,5 +70,11 @@ class ApproveTransferBypassesWebGateIntegrationTest {
         .isEqualTo(Money.wons(30_000_000));
     assertThat(accountBalanceCalculator.calculate(Account.create(RECEIVER)))
         .isEqualTo(Money.wons(20_000_000));
+
+    TransferApprovalRequest persisted =
+        approvalPersistenceAdapter.loadByRequestId(request.getRequestId()).orElseThrow();
+    assertThat(persisted.getStatus()).isEqualTo(ApprovalStatus.APPROVED);
+    assertThat(persisted.getExecutionStatus()).isEqualTo(ExecutionStatus.EXECUTED);
+    assertThat(persisted.getExecutionFailureReason()).isNull();
   }
 }

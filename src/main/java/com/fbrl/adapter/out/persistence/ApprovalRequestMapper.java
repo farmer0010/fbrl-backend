@@ -21,6 +21,8 @@ public class ApprovalRequestMapper {
         Money.of(entity.getAmount()),
         entity.getStatus(),
         entity.getRejectionReason(),
+        entity.getExecutionStatus(),
+        entity.getExecutionFailureReason(),
         entity.getRequestedAt(),
         entity.getDecidedAt(),
         entity.getVersion());
@@ -40,6 +42,8 @@ public class ApprovalRequestMapper {
         domain.getAmount().getAmount(),
         domain.getStatus(),
         domain.getRejectionReason(),
+        domain.getExecutionStatus(),
+        domain.getExecutionFailureReason(),
         domain.getRequestedAt(),
         domain.getDecidedAt(),
         domain.getVersion());
