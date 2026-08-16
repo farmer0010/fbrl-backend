@@ -91,8 +91,22 @@ class LoginIntegrationTest {
   }
 
   @Test
-  @DisplayName("토큰 없이 보호된 API를 호출하면 거부된다.")
-  void protectedEndpoint_withoutToken_isRejected() throws Exception {
-    mockMvc.perform(get("/api/v1/accounts/no-such-account")).andExpect(status().isForbidden());
+  @DisplayName("토큰 없이 보호된 API를 호출하면 401을 반환한다(인증 자체가 없는 경우).")
+  void protectedEndpoint_withoutToken_returns401() throws Exception {
+    mockMvc
+        .perform(get("/api/v1/accounts/no-such-account"))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+  }
+
+  @Test
+  @DisplayName("유효하지 않은 토큰으로 보호된 API를 호출하면 401을 반환한다.")
+  void protectedEndpoint_withInvalidToken_returns401() throws Exception {
+    mockMvc
+        .perform(
+            get("/api/v1/accounts/no-such-account")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer not-a-real-token"))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
   }
 }

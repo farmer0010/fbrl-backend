@@ -14,6 +14,7 @@ Spring Boot의 환경변수 relaxed binding은 `.`과 `-` 둘 다 단어 경계�
 
 - **loud**: 앱이 기동에 실패해 그 자리에서 드러남(배포가 막힘, 알아채기 쉬움)
 - **silent**: 앱은 정상 기동하고, 잘못된 동작이 조용히 누적됨(알아채기 어려움 — 더 위험)
+- **silent-breach**: 앱은 정상 기동하고 겉보기엔 정상 동작하지만, 보안 경계 자체가 뚫려 있는 상태 — silent보다 한 단계 더 위험함. silent는 "잘못된 결과가 쌓이는 것"이지만 silent-breach는 "인증/인가 자체가 무력화된 채로 정상처럼 보이는 것"이라, 로그나 모니터링에 이상 신호가 아예 안 남을 수 있음(침해가 일어나도 알아챌 단서 자체가 없음)
 - **N/A**: 값이 틀려도 앱 동작 자체엔 영향 없음(업무 정책값이거나, 조건부로 비활성화된 기능)
 
 ## 필수 환경변수 체크리스트
@@ -29,6 +30,8 @@ Spring Boot의 환경변수 relaxed binding은 `.`과 `-` 둘 다 단어 경계�
 | `SPRING_KAFKA_BOOTSTRAP_SERVERS` | `spring.kafka.bootstrap-servers` | `localhost:9092` | **필수** | **미확정(loud/silent 둘 다 가능성 있음)** | Kafka Producer는 일반적으로 lazy 연결이라, 이 값이 틀리거나 없어도 앱이 정상 기동하고 이벤트 발행만 조용히 실패할 가능성이 있음(미검증). **배포 후 반드시 실제 이체 1건을 발행해 `transfer-events` 토픽 수신을 직접 확인할 것.** |
 | `MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT` | `management.opentelemetry.tracing.export.otlp.endpoint` | `http://localhost:4318/v1/traces`(로컬 Jaeger) | 인프라 협의 대기 중 | silent | 배포 환경 OTLP Collector 엔드포인트가 아직 미정(PROGRESS.md에 이미 기록된 상태 그대로) — 안 바꾸면 트레이스 export만 조용히 실패, 앱 기능에는 영향 없음 |
 | `CORS_ALLOWED_ORIGINS` | `cors.allowed-origins` | `http://localhost:5173`, `http://localhost:3000` | **필수** | silent | 관리자 프론트엔드가 호출을 허용받을 오리진 목록. 실제 관리자 프론트엔드 배포 도메인으로 교체 필요 — 안 바꾸면 앱은 정상 기동하지만, 등록 안 된 오리진에서의 요청은 서버 로그 없이 브라우저 단에서 CORS 에러로만 조용히 막힘. 리스트형 값이라 콤마 구분 문자열(`CORS_ALLOWED_ORIGINS=https://admin.example.com,https://admin2.example.com`)로 오버라이드 가능 — relaxed binding이 `List<String>`으로 정상 바인딩되는지 실제 프리플라이트 요청으로 검증 완료(env var에만 있는 오리진은 허용되고, yaml 기본값에만 있던 오리진은 env var가 있으면 사라짐 — merge가 아니라 override) |
+| `JWT_SECRET` | `jwt.secret` | `local-dev-only-jwt-signing-secret-change-in-production-32bytes-min`(66바이트, 528비트 — HS256 최소 요구치인 256비트/32바이트는 충족하지만 이름 그대로 로컬 전용 더미값) | **필수** | **silent-breach** | 안 바꾸면 앱은 정상 기동하고 로그인도 정상 동작하는 것처럼 보이지만, 이 문자열이 공개 저장소에 커밋되어 있는 값이라 **누구나 같은 시크릿으로 유효한 관리자 JWT를 직접 위조해 서명할 수 있음** — 인증 자체가 사실상 없는 것과 동일한 상태가 됨. loud도 silent도 아닌 이유: silent는 "틀린 값 때문에 기능이 저하"되는 것이지만 이건 "값이 새어나가 있어서 인증 경계 자체가 무의미"해지는 것 — 겉보기엔 완벽하게 정상 동작해서 침해 여부를 앱 로그만 봐서는 절대 알 수 없음. **배포 전 반드시 별도로 생성한 고엔트로피 시크릿으로 교체할 것**(예: `openssl rand -base64 48`) |
+| `ADMIN_INITIAL_USERNAME` / `ADMIN_INITIAL_PASSWORD` | `admin.initial.username` / `admin.initial.password` | 없음(yaml 기본값 미설정 — 둘 다 비어있으면 `AdminUserSeeder`가 계정 생성 자체를 스킵) | **필수(최초 배포 1회만)** | **silent-breach** | 로컬 개발 문서/README 등에 예시로 적어둔 값을 그대로 프로덕션에 써서 배포하면, 그 값이 곧 "알려진 관리자 계정"이 되어 누구나 로그인 가능 — 이것도 앱은 정상 기동/정상 동작하므로 겉보기엔 문제가 없어 보임. 최초 1회 생성 이후에는 이 값을 바꿔도 이미 만들어진 계정 자체는 안 바뀜(`AdminUserSeeder`는 idempotent — username이 이미 존재하면 skip)이므로, 초기 배포 시점에만 강한 값을 넣는 것으로 충분하지만 그 순간이 가장 중요함 |
 | `APPROVAL_THRESHOLD` | `approval.threshold` | `10000000` | 필수 아님(업무 정책값) | N/A | Maker-Checker 승인이 필요해지는 금액 기준. 값이 틀려도 앱은 정상 동작, 업무 정책만 달라짐 |
 | `FRAUD_THRESHOLD` | `fraud.threshold` | `50000000` | 필수 아님(업무 정책값) | N/A | 이상거래 탐지 임계치. 상동 |
 | `EOD_BATCH_CRON` | `eod.batch.cron` | `"0 0 2 * * *"` | 필수 아님 | N/A | EOD 정산 배치 트리거 시각. 스테이징/프로덕션에서 다른 시각이 필요하면 이 값만 바꾸면 됨 |
@@ -55,6 +58,12 @@ Spring Boot의 환경변수 relaxed binding은 `.`과 `-` 둘 다 단어 경계�
     ALTER TABLE transfer_approval_requests ADD COLUMN execution_failure_reason VARCHAR(255);
     ```
   - 배포 전 이 DDL을 프로덕션 DB에 먼저 적용하지 않으면, 새 애플리케이션 버전은 `ddl-auto: validate`가 스키마 불일치를 즉시 감지해 기동 자체가 실패합니다(loud) — 데이터 정합성보다는 기동 실패로 먼저 드러나는 종류의 변경.
+
+## 인증 실패 시 HTTP 상태 코드 (프론트엔드 참고)
+
+- **401 Unauthorized** — 요청에 유효한 인증 정보가 아예 없는 경우. `Authorization` 헤더 자체가 없거나, 토큰이 만료/위조/형식 오류로 `TokenPort.validateToken()`이 실패한 경우 전부 여기에 해당. 응답 바디는 `{"code":"UNAUTHORIZED", "message":"...", "timestamp":"..."}`.
+- **403 Forbidden** — 인증은 됐지만(유효한 토큰을 갖고 있지만) 해당 작업을 수행할 권한이 없는 경우. 응답 바디는 `{"code":"FORBIDDEN", "message":"...", "timestamp":"..."}`.
+- 현재 스코프(단일 `ADMIN` 역할)에서는 403이 실제로 발생할 경로가 없습니다 — 역할이 하나뿐이라 "인증은 됐는데 권한이 부족한" 상황 자체가 없기 때문입니다. 그래도 401/403을 처음부터 분리해둔 이유: 나중에 역할이 늘어나면(예: 조회 전용 역할 추가) 403 경로가 바로 의미를 갖게 되고, 프론트엔드도 그때 가서 에러 처리 로직을 새로 만들 필요 없이 지금부터 "401=로그인 필요, 403=권한 부족"으로 분기해두면 됩니다.
 
 ## 인프라 팀과 협의 필요한 별도 항목
 
