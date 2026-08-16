@@ -71,6 +71,11 @@ k8s:
     renew-deadline-seconds: 10
     retry-period-seconds: 2
 
+cors:
+  allowed-origins:
+    - http://localhost:5173
+    - http://localhost:3000
+
 approval:
   threshold: 10000000
 
