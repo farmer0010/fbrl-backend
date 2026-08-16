@@ -14,7 +14,7 @@
 ```
 com.fbrl
 ├── domain
-│   ├── model       # Account, Money, TransferSaga, SagaStatus, OutboxEvent, EodSnapshot, InterestPolicy
+│   ├── model       # Account, Money, TransferSaga, SagaStatus, OutboxEvent, EodSnapshot, InterestPolicy, ReconciliationDiscrepancy, ReconciliationStatus, LedgerBalanceDelta
 │   ├── exception    # 도메인 전용 예외 (프레임워크 예외 번역 대상)
 │   └── event        # TransferCompletedEvent
 ├── application
@@ -25,8 +25,8 @@ com.fbrl
 │   ├── in
 │   │   ├── web         # AccountController, TransferMoneyController, TransferApprovalController, AuditController, GlobalExceptionHandler
 │   │   ├── kafka        # TransferEventConsumer, KafkaRetryTopicConfig
-│   │   ├── batch         # EodSettlementJobConfig, AccountItemReader/Processor/Writer
-│   │   └── scheduler      # EodSettlementScheduler
+│   │   ├── batch         # EodSettlementJobConfig, AccountItemReader/Processor/Writer, ReconciliationJobConfig/ItemWriter
+│   │   └── scheduler      # EodSettlementScheduler, ReconciliationScheduler
 │   └── out
 │       ├── persistence   # JPA 엔티티/리포지토리/매퍼/영속성 어댑터
 │       ├── messaging      # KafkaProducerConfig/TopicConfig (Retry Topic 전용, Port 미구현)
@@ -204,6 +204,31 @@ com.fbrl
 - `ApproveTransferTriggersFraudCheckIntegrationTest`(`@SpringBootTest`)로 Mock 없이 승인 경로에서도 threshold 이상 금액이 실제로 차단되고 잔액이 이동하지 않는지 검증 — Maker-Checker 승인 게이트가 겪었던 우회 사고의 재발 방지 확인.
 
 > PROGRESS.md 기준으로 이 결정은 과제 21에 해당하며, 그 사이 과제 13~15(PostgreSQL 전환, Debezium CDC 전환, 해시체인 감사로그)와 과제 20(거절 사유 조회 API)도 함께 복원·기록되었습니다. 자세한 내용은 [`PROGRESS.md`](./PROGRESS.md)를 참고하세요.
+
+### 13. EOD 정산 대사(Reconciliation) 엔진 도입 — 완료
+
+**문제 상황**: 과제 10(복식부기 원장)에서 이미 `VerifyTrialBalanceService`/`TrialBalanceVerificationTasklet`으로 "시스템 전체 `LedgerEntry` 차변합=대변합" 검증이 `eodSettlementJob` 안에 존재해, 신규 대사(Reconciliation) 기능이 이것과 중복인지부터 확인이 필요했음. 조사 결과 trial balance는 시스템 전체 스칼라 2개(전체 차변/대변 합)만 비교하고 `EodSnapshot`을 전혀 참조하지 않는 반면, 대사 엔진이 검증해야 할 대상은 "`AccountBalanceCalculator`가 상시 사용하는 앵커(`EodSnapshot`) 캐시가 원장(`LedgerEntry`) 원본과 실제로 일치하는가"라는 계좌 단위의 다른 질문이라 중복이 아님으로 판단.
+
+**대사 대상 옵션 비교**: (a) 계좌별 `EodSnapshot`(앵커) vs 해당 계좌의 genesis부터 `LedgerEntry` 전량 재계산 — 앵커+델타 최적화 경로가 실제로 원장과 어긋나지 않았는지 검증하는 유일한 방법 (b) 계좌별 잔액 합계 vs 시스템 전체 trial balance 재검증 — 수학적으로 `transferPair`의 구조적 보장과 거의 항상 같은 값이라 새로운 결함을 잡을 확률이 낮음 (c) 외부/레거시 코어뱅킹 산출물 vs 원장 — 이 프로젝트엔 그런 라이브 외부 소스가 현재 존재하지 않아(과제 10에서 `accounts.balance` 컬럼 자체가 제거됨) 이번 스코프에서 인프라가 없음. **(a) 채택**.
+
+**계좌별 EodSnapshot 특정 방식 옵션 비교**: (1) 정확히 오늘 날짜(`settlementDate`) 스냅샷만 대상, 없으면 "스냅샷 없음"으로 명시 분류(불일치 아님) (2) 계좌별 "가장 최근" 스냅샷을 날짜 무관하게 사용. **(1) 채택** — (2)는 EOD가 며칠간 실패해도 예전 스냅샷이 "존재한다"는 우연한 사실만으로 계속 초록불을 켜주는, 과제 10의 `ReservedAccountException`(존재하지 않아서 우연히 막히는 방어) 사례와 대칭되는 "존재해서 우연히 통과하는" 문제가 있어 기각. `LoadEodSnapshotByDatePort`로 날짜 조건을 명시적으로 강제.
+
+**불일치 처리 및 배치 위치**: trial balance(시스템 전체 불변식 위반=심각한 버그이므로 배치 즉시 실패가 타당)와 달리, Reconciliation은 계좌 단위 부분 실패라 같은 패턴(예외로 배치 실패)을 그대로 적용하면 계좌 1건 때문에 EOD 정산 전체가 막힘 — 대신 `ReconciliationDiscrepancy`(write-once, `@Version` 없음, `EodSnapshot`과 동일한 append-only 산출물 성격) 별도 테이블에 `MISMATCH`/`NO_SNAPSHOT`만 기록(`MATCH`는 저장하지 않음 — 전수 검사 건수는 Spring Batch `StepExecution`의 read/write count로 충분). Job도 `eodSettlementJob`과 완전히 분리한 별도 Job(`reconciliationJob`)으로 두어, 대사 비용이 EOD 크리티컬 패스(이자 계산·스냅샷 저장)를 지연시키지 않도록 함. 운영자 "확인 처리(resolved)" 워크플로는 현재 이 프로젝트에 그런 기능/화면이 전혀 없어 YAGNI로 제외 — 필요해지면 `EodSnapshot`처럼 정정을 새 레코드 추가로 표현.
+
+**청크 단위 배치 조회 설계**: `AccountItemReader`(과제 10에서 이미 `LoadAllAccountsPort.loadAccounts(page, size)`로 `findAll()` 없이 페이징하던 것) 그대로 재사용하되, 초기 설계는 `ItemProcessor`가 계좌 1건마다 스냅샷/원장 델타를 개별 쿼리하는 구조였음 — 청크 크기(1000)만큼 청크당 N번 왕복이 발생하는 문제를 사용자가 지적해, 무거운 조회를 `ItemProcessor`가 아니라 청크 전체(`List<Account>`)를 한 번에 받는 `ItemWriter`(`EodSnapshotItemWriter`가 이미 쓰는 것과 동일한 위치)로 이동. `LoadEodSnapshotByDatePort.loadByAccountNumbersAndDate(List, LocalDate)`와 `LoadLedgerBalanceDeltasPort.loadBalanceDeltasUntil(List, Instant)` 모두 청크당 1쿼리로 수렴.
+
+원장 델타 조회는 애초에 `List<LedgerEntry>` 원본 행을 그대로 배치 `IN` 조회하는 형태로 설계했으나, 계좌당 거래 건수가 무제한이라 거래량 많은 계좌가 청크에 섞이면 결과 크기가 다시 unbounded해지는(`findAll()` 금지와 같은 유형의) 문제가 있어, SQL `GROUP BY account_number`로 계좌별 신용/차변 합계까지 미리 집계해 반환하도록 재설계(`LedgerBalanceDelta(creditTotal, debitTotal)`, 결과 크기가 청크당 계좌 수로 bounded). 순델타(credit-debit)를 SQL에서 미리 빼서 단일 `Money`로 반환하지 않고 신용/차변을 분리 반환한 이유: `Money`는 음수를 금지하는데(`Money.validate()`), 순델타는 특정 계좌에서 차변이 신용보다 커지는 상황(정상적으로는 발생하지 않지만 실제 원장 불변식이 깨졌을 때는 발생 가능)에 음수가 될 수 있어 그대로 `Money`로 감싸면 생성자가 예외를 던져 대사 배치 자체가 죽음.
+
+**Job 파라미터 설계**: Reconciliation은 EOD와 달리 원장 재계산의 상한 시각(`asOf`)이 필요 — 하한 없이(genesis부터) 상한만 두면 EOD 스냅샷 계산 시점과 Reconciliation 실행 시점 사이에 발생한 정상 거래까지 재계산에 포함되어 거짓 `MISMATCH`가 발생하기 때문. `ReconciliationScheduler`가 트리거 시각을 `asOf` 파라미터로 넘기는데, 이 값은 매 실행마다 달라지므로 `JobParametersBuilder.addString(key, value, false)`로 **non-identifying**으로 지정 — 그러지 않으면 Job 인스턴스 식별이 매번 달라져 EOD와 동일하게 갖고 있어야 할 "당일 재실행 스킵" 보호(`JobInstanceAlreadyCompleteException`)가 조용히 무력화됨.
+
+**expectedBalance 계산 버그 및 수정 (사용자 확인 중 발견)**: 최초 구현은 `expectedBalance`로 `EodSnapshot.totalBalance()`(`closingBalance + interestAmount`)를 사용했음. `AccountInterestItemProcessor`가 계산하는 `interestAmount`는 스냅샷 필드에만 기록될 뿐 `LedgerEntry`로 전혀 적립되지 않는데(grep으로 확인, `transferPair`/`SaveLedgerEntryPort` 사용처 어디에도 이자 적립 로직 없음), `actualBalance`는 원장만 재계산한 값이라 이자를 포함하지 않음 — 결과적으로 이자가 0이 아닌 사실상 모든 계좌가 매일 `MISMATCH`로 오탐되는 버그였음. 이게 안 걸린 이유는 초기 단위 테스트들이 이자를 전부 `Money.ZERO`로 고정해 시나리오 자체를 가렸기 때문. `expectedBalance`를 이자 제외 `EodSnapshot.closingBalance()`로 교체하고, 이자가 0이 아닌 케이스로 테스트를 재작성해 회귀 방지.
+
+**구현 내용**:
+- Port 3종(`application.port.out`): `LoadEodSnapshotByDatePort`, `LoadLedgerBalanceDeltasPort`, `SaveReconciliationDiscrepancyPort`.
+- `domain.model.ReconciliationDiscrepancy`(record, write-once) — `expectedBalance`(`Money`, nullable)/`actualBalance`(`Money`, nullable — `MISMATCH`만 채워짐)/`status`(`ReconciliationStatus`: `MISMATCH`/`NO_SNAPSHOT`), `domain.model.LedgerBalanceDelta`(record, `creditTotal`/`debitTotal` 둘 다 `Money`).
+- `adapter.out.persistence.ReconciliationDiscrepancyJpaEntity` — `(account_number, settlement_date)` 유니크 제약, `@Version` 없음(write-once). `*JpaRepository`는 package-private, `*Mapper`는 public 컨벤션 유지. `DataIntegrityViolationException`은 `DuplicateReconciliationDiscrepancyException`으로 번역.
+- `adapter.in.batch.ReconciliationJobConfig`/`ReconciliationItemWriter` — 별도 `reconciliationJob`, reader는 기존 `AccountItemReader` 재사용(새 `@StepScope` 빈으로만 재선언).
+- `adapter.in.scheduler.ReconciliationScheduler` — `${reconciliation.batch.cron:0 0 3 * * *}`(EOD 이후 시각), ShedLock `@SchedulerLock(name = "reconciliationJob")`.
 
 ---
 

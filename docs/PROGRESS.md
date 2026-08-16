@@ -605,6 +605,50 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 - **`ApproveTransferTriggersFraudCheckIntegrationTest`(신규, `@SpringBootTest`) — 과제 19의 `ApproveTransferBypassesWebGateIntegrationTest`와 동일한 패턴으로, `ApproveTransferService.approve()` 경유 승인 후 트리거 경로에서도 threshold 이상 금액이면 `SuspiciousTransferException`이 실제로 발생하고 잔액이 이동하지 않는지 Mock 없이 실물 DB로 검증** — 과제 19에서 승인 경로가 게이트를 우회했던 사고와 반대 방향(우회되면 안 되는 로직)의 재발 방지 확인.
 - 전체 테스트(`./gradlew test`) 통과 확인, `./gradlew spotlessCheck` 통과.
 
+### 과제 22: EOD 정산 대사(Reconciliation) 엔진 도입 (완료)
+
+브랜치: `feat/reconciliation-engine` → `develop` (PR #49)
+
+**배경**
+
+- 과제 10(복식부기 원장)에서 이미 "시스템 전체 `LedgerEntry` 차변합=대변합" 검증(`VerifyTrialBalanceService`/`TrialBalanceVerificationTasklet`)이 `eodSettlementJob`의 `trialBalanceVerificationStep`으로 존재해, 착수 전 이 기능과의 중복 여부부터 코드로 직접 확인 — trial balance는 시스템 전체 스칼라 2개만 비교하고 `EodSnapshot`을 전혀 참조하지 않는 반면, Reconciliation은 "`AccountBalanceCalculator`가 상시 사용하는 앵커(`EodSnapshot`) 캐시가 원장 원본과 실제로 일치하는가"라는 계좌 단위의 다른 질문이라 중복 아님으로 판단.
+- 계좌별 "진실 소스" 후보(레거시 마이그레이션 시딩 데이터, 다른 배치 산출물 등)도 조사했으나, 이 프로젝트엔 라이브 외부 소스가 없고(과제 10에서 `accounts.balance` 컬럼 자체가 제거됨) 유일한 SSOT는 `LedgerEntry`, `EodSnapshot`은 그 파생 캐시임을 확인.
+
+**설계 결정 (옵션 제시 → 사용자 확정, 여러 라운드에 걸쳐 진행)**
+
+1. **대사 대상 — 계좌별 `EodSnapshot`(앵커) vs genesis부터 `LedgerEntry` 전량 재계산**: 계좌별 잔액 합계를 시스템 전체 trial balance와 재대조하는 옵션은 `transferPair`의 구조적 보장과 수학적으로 거의 항상 같아 새 결함을 못 잡을 것으로 판단해 기각.
+2. **스냅샷 특정 — 정확히 오늘 날짜(`settlementDate`)만, 없으면 `NO_SNAPSHOT`으로 명시 분류**: "가장 최근" 스냅샷을 날짜 무관하게 쓰는 옵션은, EOD가 며칠 실패해도 예전 스냅샷이 "존재한다"는 우연한 사실만으로 계속 통과시키는 문제가 있어(과제 10 `ReservedAccountException`과 대칭되는 "우연히 통과" 사례) 기각.
+3. **불일치 처리 — 별도 write-once 테이블(`ReconciliationDiscrepancy`), `MISMATCH`/`NO_SNAPSHOT`만 저장, `@Version` 없음**: trial balance처럼 예외로 배치 전체를 실패시키는 옵션은, Reconciliation이 계좌 단위 부분 실패라 계좌 1건 때문에 EOD 정산 전체를 막는 게 과함. 운영자 "확인 처리" 워크플로는 이 프로젝트에 그런 기능이 전혀 없어 YAGNI로 이번 스코프에서 명시 제외.
+4. **배치 위치 — `eodSettlementJob`과 완전히 분리된 별도 Job(`reconciliationJob`), EOD 이후 시각 스케줄**: 대사 비용이 EOD 크리티컬 패스(이자 계산·스냅샷 저장)를 지연시키지 않도록 분리. Job 레벨 사전 게이트(`JobExplorer`로 EOD 완료 확인)는 계좌별 `NO_SNAPSHOT` 분류만으로도 "EOD가 안 돌았다"는 사실이 이미 드러나므로 이번엔 넣지 않고, 알림이 너무 많이 쌓이면 그때 추가(YAGNI).
+
+**청크 배치 쿼리 재설계 (사용자 지적으로 2차 수정)**
+
+- 최초 설계는 `ItemProcessor`가 계좌 1건마다 스냅샷/원장 델타를 개별 쿼리하는 구조 → 청크 크기(1000)만큼 청크당 최대 1000번 왕복하는 문제를 사용자가 지적. 무거운 조회를 `ItemProcessor`가 아니라 청크 전체(`List<Account>`)를 한 번에 받는 `ItemWriter`(`EodSnapshotItemWriter`가 이미 쓰던 것과 동일한 위치)로 이동 — `LoadEodSnapshotByDatePort`/`LoadLedgerBalanceDeltasPort` 모두 청크당 1쿼리로 수렴.
+- 원장 델타 조회도 처음엔 `List<LedgerEntry>` 원본 행을 배치 `IN` 조회하는 형태였으나, 계좌당 거래 건수가 무제한이라 거래량 많은 계좌가 청크에 섞이면 결과 크기가 다시 unbounded해지는(`findAll()` 금지와 같은 유형) 문제를 사용자가 지적 — SQL `GROUP BY account_number`로 계좌별 신용/차변 합계까지 미리 집계해 반환하도록 재설계, 결과 크기가 청크당 계좌 수로 bounded됨.
+- 순델타(credit-debit)를 SQL에서 미리 빼서 단일 `Money`로 반환하지 않고 신용/차변을 분리 반환(`LedgerBalanceDelta`)하는 이유: `Money`가 음수를 금지하는데(`Money.validate()`), 순델타는 원장 불변식이 실제로 깨졌을 때 음수가 될 수 있어 그대로 `Money`로 감싸면 생성자가 예외를 던져 대사 배치 자체가 죽음.
+
+**구현 내용**
+
+- Port 3종(`application.port.out`): `LoadEodSnapshotByDatePort`, `LoadLedgerBalanceDeltasPort`, `SaveReconciliationDiscrepancyPort`.
+- `domain.model.ReconciliationDiscrepancy`(write-once record)/`ReconciliationStatus`(`MISMATCH`/`NO_SNAPSHOT`)/`LedgerBalanceDelta`(`creditTotal`/`debitTotal` 둘 다 `Money`).
+- `adapter.out.persistence.ReconciliationDiscrepancyJpaEntity`(`(account_number, settlement_date)` 유니크 제약, `@Version` 없음) + package-private `*JpaRepository`/public `*Mapper`/`*PersistenceAdapter`(`DataIntegrityViolationException` → `DuplicateReconciliationDiscrepancyException` 번역).
+- `adapter.in.batch.ReconciliationJobConfig`/`ReconciliationItemWriter`(reader는 `AccountItemReader` 재사용) + `adapter.in.scheduler.ReconciliationScheduler`(`${reconciliation.batch.cron:0 0 3 * * *}`, ShedLock).
+- `ReconciliationScheduler`의 `asOf`(트리거 시각) 잡 파라미터는 `JobParametersBuilder.addString(key, value, false)`로 **non-identifying** 지정 — 매 실행마다 값이 달라지므로 identifying으로 두면 Job 인스턴스가 매번 새로 취급되어 EOD와 동일하게 갖고 있어야 할 "당일 재실행 스킵" 보호가 무력화됨.
+
+**expectedBalance 계산 버그 발견 및 수정 (커밋 전 사용자 확인 중 발견)**
+
+- 최초 구현은 `expectedBalance`로 `EodSnapshot.totalBalance()`(`closingBalance + interestAmount`)를 사용. `AccountInterestItemProcessor`가 계산하는 이자는 스냅샷 필드에만 기록될 뿐 `LedgerEntry`로 전혀 적립되지 않는데(grep으로 확인, `transferPair`/`SaveLedgerEntryPort` 사용처 어디에도 이자 적립 로직 없음), `actualBalance`는 원장만 재계산한 값이라 이자가 빠져 있어, 이자가 0이 아닌 사실상 모든 계좌가 매일 `MISMATCH`로 오탐되는 버그였음.
+- 안 걸린 이유: 초기 `ReconciliationItemWriterTest`/`ReconciliationJobConfigTest`가 이자를 전부 `Money.ZERO`로 고정하거나 스냅샷 자체를 생성하지 않아(`NO_SNAPSHOT` 경로만 실행) 이 시나리오를 검증한 적이 없었음.
+- 수정: `expectedBalance`를 이자 제외 `EodSnapshot.closingBalance()`로 교체. 이자가 0이 아닌 값(500원/300원)으로 MATCH/MISMATCH 단위 테스트를 재작성하고, `ReconciliationJobConfigTest`에도 스냅샷을 실제로 시딩해 MISMATCH 종단 경로(이자 5,000원 포함 스냅샷 vs 원장 재계산 불일치)를 추가.
+
+**테스트**
+
+- `LedgerEntryPersistenceAdapterTest`(신규) — `loadBalanceDeltasUntil`이 활동 없는 계좌도 `Money.ZERO`로 채워 결과 Map을 요청 계좌 전원에 대해 완전하게 반환하는지, `until` 이후 원장은 델타에서 제외되는지 검증.
+- `ReconciliationItemWriterTest`(신규) — 이자가 붙어 있어도 재계산이 `closingBalance`와 일치하면 MATCH(미저장) / 불일치하면 MISMATCH(저장) / 스냅샷 없으면 NO_SNAPSHOT(저장, 델타 조회 자체를 안 함) 3케이스.
+- `ReconciliationDiscrepancyPersistenceAdapterTest`(신규) — `(account_number, settlement_date)` 유니크 제약 위반 시 `DuplicateReconciliationDiscrepancyException` 번역 검증.
+- `ReconciliationJobConfigTest`(신규) — NO_SNAPSHOT/MISMATCH 두 경로 모두 Job이 `BatchStatus.COMPLETED`로 끝나고 `ReconciliationDiscrepancy`가 정확히 기록되는지 종단 검증.
+- 전체 테스트(`./gradlew test`) 128개 통과(스킵 1건은 기존 `FbrlBackendApplicationTests`, 본 작업과 무관), `./gradlew spotlessCheck` 통과.
+
 ## 🚧 다음 작업
 
 - 트랙 3(장애 복구 & 카오스 엔지니어링) 두 과제(Kafka DLQ, Resilience4j) 완료 — 3개 트랙(실시간 트랜잭션/EOD 배치/장애복구) 모두 핵심 구현 최소 1개 이상 완료.
@@ -614,6 +658,7 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 - (보류) Debezium EventRouter SMT의 `table.fields.additional.placement`(trace_id/span_id 헤더 라우팅)를 커버하는 자동화된 통합 테스트 — 위 두 항목과 같은 이유(실제 Kafka 브로커 필요)로 보류, 현재는 로컬 수동 검증으로만 확인됨(과제 17 참고)
 - (보류) Testcontainers 기반 통합 테스트 재검증 — 프로젝트 전체가 docker-compose 기반 통합 테스트 컨벤션을 일관되게 쓰고 있어 현재는 도입 보류로 결정(Testcontainers는 이 컨벤션과 공존 시 일관성이 깨짐, YAGNI)
 - (권장) 실제 배포 대상 Postgres에 `accounts.balance` 컬럼 등 orphan 컬럼이 남아있다면 `ALTER TABLE ... DROP COLUMN`으로 별도 정리 필요(과제 16 참고, 이 프로젝트는 Flyway/Liquibase 미사용)
+- (보류) Reconciliation Job 레벨 사전 게이트(`JobExplorer`로 당일 `eodSettlementJob` 완료 여부를 확인 후 스킵) — 계좌별 `NO_SNAPSHOT` 분류만으로도 "EOD가 안 돌았다"는 사실이 이미 드러나므로 이번 스코프에서는 제외(YAGNI). 알림이 너무 많이 쌓여 노이즈가 문제되면 추가(과제 22 참고)
 
 ## 🤖 AI 에이전트(Claude Code) 활용 방침
 
@@ -668,4 +713,4 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 
 ---
 
-마지막 업데이트: 2026-08-15
+마지막 업데이트: 2026-08-16

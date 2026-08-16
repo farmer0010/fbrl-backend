@@ -27,8 +27,8 @@ graph TB
     subgraph adapter_in["adapter.in — 입력 어댑터"]
         WEB["web<br/>(AccountController, TransferMoneyController, TransferApprovalController, AuditController)"]
         KAFKA_IN["kafka<br/>(TransferEventConsumer)"]
-        BATCH["batch<br/>(EodSettlementJobConfig)"]
-        SCHED["scheduler<br/>(EodSettlementScheduler)"]
+        BATCH["batch<br/>(EodSettlementJobConfig, ReconciliationJobConfig)"]
+        SCHED["scheduler<br/>(EodSettlementScheduler, ReconciliationScheduler)"]
     end
 
     subgraph application["application — 유스케이스"]
@@ -94,6 +94,7 @@ graph TB
 - ShedLock 기반 다중 인스턴스 스케줄러 중복 실행 방지
 - Kubernetes Lease API 기반 리더 선출 연동 (`k8s.leader-election.enabled` 플래그, 기본 비활성화 — kind/kubeconfig 없는 환경에서도 기존 테스트가 깨지지 않도록 조건부 활성화)
 - 시스템 전체 대차평형(trial balance) 검증 배치 스텝 — 매일 EOD 마감 시 전체 `LedgerEntry` 차변/대변 합을 대조해 불일치 시 배치 실패로 알림
+- EOD 정산 대사(Reconciliation) 엔진 — `eodSettlementJob`과 분리된 별도 Job(`ReconciliationJobConfig`)으로, 계좌별 `EodSnapshot`(오늘자, 이자 제외 `closingBalance`)과 `LedgerEntry` 전량 재계산 결과를 대조해 `MISMATCH`/`NO_SNAPSHOT`을 `reconciliation_discrepancies`에 기록(일치 건은 저장하지 않음). trial balance(시스템 전체 SUM=0)와는 검증 레벨이 달라 중복이 아님 — 계좌 단위로 EodSnapshot 앵커 캐시 자체의 정합성을 검증
 
 ### 트랙 3 — 장애 복구 & 복원력
 - Kafka Consumer Non-blocking Retry Topic + DLT (결정론적 실패는 즉시 DLT로, 일시적 실패는 지수 백오프 재시도)
