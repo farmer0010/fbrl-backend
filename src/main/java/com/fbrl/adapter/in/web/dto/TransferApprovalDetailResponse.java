@@ -1,6 +1,7 @@
 package com.fbrl.adapter.in.web.dto;
 
 import com.fbrl.domain.model.ApprovalStatus;
+import com.fbrl.domain.model.ExecutionStatus;
 import com.fbrl.domain.model.TransferApprovalRequest;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -14,6 +15,7 @@ public record TransferApprovalDetailResponse(
     BigDecimal amount,
     ApprovalStatus status,
     String rejectionReason,
+    ExecutionStatus executionStatus,
     Instant requestedAt,
     Instant decidedAt) {
   public static TransferApprovalDetailResponse from(TransferApprovalRequest request) {
@@ -26,6 +28,7 @@ public record TransferApprovalDetailResponse(
         request.getAmount().getAmount(),
         request.getStatus(),
         request.getRejectionReason(),
+        request.getExecutionStatus(),
         request.getRequestedAt(),
         request.getDecidedAt());
   }
