@@ -76,6 +76,10 @@ cors:
     - http://localhost:5173
     - http://localhost:3000
 
+jwt:
+  secret: "local-dev-only-jwt-signing-secret-change-in-production-32bytes-min"
+  expiration-seconds: 3600
+
 approval:
   threshold: 10000000
 
