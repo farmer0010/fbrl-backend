@@ -2,11 +2,14 @@ package com.fbrl.adapter.out.persistence;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fbrl.application.port.out.SaveEodSnapshotPort;
 import com.fbrl.application.port.out.SaveLedgerEntryPort;
 import com.fbrl.domain.model.Account;
+import com.fbrl.domain.model.EodSnapshot;
 import com.fbrl.domain.model.LedgerEntry;
 import com.fbrl.domain.model.Money;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -36,6 +39,7 @@ class ReconciliationJobConfigTest {
   @Autowired private ReconciliationDiscrepancyJpaRepository reconciliationDiscrepancyJpaRepository;
   @Autowired private LedgerEntryPersistenceAdapter ledgerEntryPersistenceAdapter;
   @Autowired private SaveLedgerEntryPort saveLedgerEntryPort;
+  @Autowired private SaveEodSnapshotPort saveEodSnapshotPort;
 
   @BeforeEach
   void setUp() {
@@ -57,7 +61,7 @@ class ReconciliationJobConfigTest {
 
   @Test
   @DisplayName("스냅샷 없는 계좌를 NO_SNAPSHOT으로 기록하고 Job이 COMPLETED된다.")
-  void executeReconciliationJob() throws Exception {
+  void executeReconciliationJob_noSnapshotCase() throws Exception {
     JobParameters jobParameters =
         new JobParametersBuilder()
             .addString("settlementDate", "2026-08-16")
@@ -73,5 +77,32 @@ class ReconciliationJobConfigTest {
     assertThat(discrepancies).hasSize(1);
     assertThat(discrepancies.get(0).getAccountNumber()).isEqualTo("111-111");
     assertThat(discrepancies.get(0).getStatus().name()).isEqualTo("NO_SNAPSHOT");
+  }
+
+  @Test
+  @DisplayName("이자가 포함된 스냅샷이 실제 원장 재계산과 다르면 MISMATCH로 기록하고 Job이 COMPLETED된다.")
+  void executeReconciliationJob_mismatchCase() throws Exception {
+    saveEodSnapshotPort.saveAll(
+        List.of(
+            EodSnapshot.of(
+                "111-111", Money.wons(900_000), Money.wons(5_000), LocalDate.of(2026, 8, 16))));
+
+    JobParameters jobParameters =
+        new JobParametersBuilder()
+            .addString("settlementDate", "2026-08-16")
+            .addString("asOf", Instant.now().toString(), false)
+            .toJobParameters();
+
+    JobExecution execution = jobOperatorTestUtils.launchJob(jobParameters);
+
+    assertThat(execution.getStatus()).isEqualTo(BatchStatus.COMPLETED);
+
+    List<ReconciliationDiscrepancyJpaEntity> discrepancies =
+        reconciliationDiscrepancyJpaRepository.findAll();
+    assertThat(discrepancies).hasSize(1);
+    assertThat(discrepancies.get(0).getAccountNumber()).isEqualTo("111-111");
+    assertThat(discrepancies.get(0).getStatus().name()).isEqualTo("MISMATCH");
+    assertThat(discrepancies.get(0).getExpectedBalance()).isEqualByComparingTo("900000");
+    assertThat(discrepancies.get(0).getActualBalance()).isEqualByComparingTo("1000000");
   }
 }

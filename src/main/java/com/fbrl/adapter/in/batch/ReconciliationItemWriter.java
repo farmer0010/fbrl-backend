@@ -63,7 +63,7 @@ public class ReconciliationItemWriter implements ItemWriter<Account> {
       LedgerBalanceDelta delta = deltasByAccountNumber.get(accountNumber);
       Money actualBalance =
           Money.of(delta.creditTotal().getAmount().subtract(delta.debitTotal().getAmount()));
-      Money expectedBalance = snapshot.totalBalance();
+      Money expectedBalance = snapshot.closingBalance();
 
       if (!expectedBalance.equals(actualBalance)) {
         discrepancies.add(

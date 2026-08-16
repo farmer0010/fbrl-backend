@@ -48,11 +48,12 @@ class ReconciliationItemWriterTest {
   }
 
   @Test
-  @DisplayName("스냅샷과 재계산 값이 일치하면 MATCH이며 저장하지 않는다.")
-  void write_matchingAccount_doesNotSave() {
+  @DisplayName("이자가 붙어 있어도 재계산 값이 closingBalance와 일치하면 MATCH이며 저장하지 않는다.")
+  void write_matchingAccountWithNonZeroInterest_doesNotSave() {
     ReconciliationItemWriter writer = writer();
     Account account = Account.create("111-111");
-    EodSnapshot snapshot = EodSnapshot.of("111-111", Money.wons(8000), Money.ZERO, SETTLEMENT_DATE);
+    EodSnapshot snapshot =
+        EodSnapshot.of("111-111", Money.wons(8000), Money.wons(500), SETTLEMENT_DATE);
 
     given(
             loadEodSnapshotByDatePort.loadByAccountNumbersAndDate(
@@ -67,11 +68,12 @@ class ReconciliationItemWriterTest {
   }
 
   @Test
-  @DisplayName("스냅샷과 재계산 값이 다르면 MISMATCH로 저장한다.")
+  @DisplayName("이자를 제외한 closingBalance와 재계산 값이 다르면 MISMATCH로 저장한다.")
   void write_mismatchingAccount_savesMismatch() {
     ReconciliationItemWriter writer = writer();
     Account account = Account.create("222-222");
-    EodSnapshot snapshot = EodSnapshot.of("222-222", Money.wons(9000), Money.ZERO, SETTLEMENT_DATE);
+    EodSnapshot snapshot =
+        EodSnapshot.of("222-222", Money.wons(9000), Money.wons(300), SETTLEMENT_DATE);
 
     given(
             loadEodSnapshotByDatePort.loadByAccountNumbersAndDate(
