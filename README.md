@@ -130,4 +130,5 @@ curl -X POST -H "Content-Type: application/json" \
 
 - 아키텍처 상세 설명 및 기술적 의사결정 근거: [`ARCHITECTURE.md`](./docs/ARCHITECTURE.md)
 - 전체 작업 이력/트러블슈팅 기록: [`PROGRESS.md`](./docs/PROGRESS.md)
+- 배포 시 필수 환경변수 체크리스트: [`DEPLOYMENT.md`](./docs/DEPLOYMENT.md)
 - AI 에이전트 작업 가드레일: [`CLAUDE.md`](./CLAUDE.md)
