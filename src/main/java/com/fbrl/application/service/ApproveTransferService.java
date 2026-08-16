@@ -7,10 +7,14 @@ import com.fbrl.application.port.out.LoadApprovalRequestPort;
 import com.fbrl.application.port.out.SaveApprovalRequestPort;
 import com.fbrl.domain.exception.ApprovalRequestNotFoundException;
 import com.fbrl.domain.model.TransferApprovalRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 @Service
 public class ApproveTransferService implements ApproveTransferUseCase {
+
+  private static final Logger log = LoggerFactory.getLogger(ApproveTransferService.class);
 
   private final LoadApprovalRequestPort loadApprovalRequestPort;
   private final SaveApprovalRequestPort saveApprovalRequestPort;
@@ -38,10 +42,28 @@ public class ApproveTransferService implements ApproveTransferUseCase {
     request.approve(command.checkerId());
     TransferApprovalRequest saved = saveApprovalRequestPort.save(request);
 
-    transferMoneyUseCase.transfer(
-        new TransferMoneyCommand(
-            saved.getFromAccountNumber(), saved.getToAccountNumber(), saved.getAmount()));
+    try {
+      transferMoneyUseCase.transfer(
+          new TransferMoneyCommand(
+              saved.getFromAccountNumber(), saved.getToAccountNumber(), saved.getAmount()));
+    } catch (RuntimeException e) {
+      saved.markExecutionFailed(e.getMessage());
+      trySaveExecutionResult(saved);
+      throw e;
+    }
+
+    saved.markExecuted();
+    saved = trySaveExecutionResult(saved);
 
     return new ApprovalDecisionResult(saved.getRequestId(), saved.getStatus());
+  }
+
+  private TransferApprovalRequest trySaveExecutionResult(TransferApprovalRequest request) {
+    try {
+      return saveApprovalRequestPort.save(request);
+    } catch (RuntimeException e) {
+      log.error("승인 요청 {}의 집행 결과(executionStatus) 저장에 실패했습니다.", request.getRequestId(), e);
+      return request;
+    }
   }
 }
