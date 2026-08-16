@@ -649,9 +649,57 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 - `ReconciliationJobConfigTest`(신규) — NO_SNAPSHOT/MISMATCH 두 경로 모두 Job이 `BatchStatus.COMPLETED`로 끝나고 `ReconciliationDiscrepancy`가 정확히 기록되는지 종단 검증.
 - 전체 테스트(`./gradlew test`) 128개 통과(스킵 1건은 기존 `FbrlBackendApplicationTests`, 본 작업과 무관), `./gradlew spotlessCheck` 통과.
 
+### 과제 23: 승인 상태(status)와 이체 집행 결과(executionStatus) 분리 (완료)
+
+브랜치: `fix/decouple-approval-status-from-execution-result` → `develop` (PR #53)
+
+**배경**
+
+- 포트폴리오 캡처 세션 중 실제로 재현: 이상거래 임계치(5천만원) 이상 금액을 Maker-Checker로 승인해도, `ApproveTransferService.approve()` 내부에서 `transferMoneyUseCase.transfer()`가 `SuspiciousTransferException`으로 실패하면 승인 요청의 `status`는 `APPROVED`로 남고 실제 자금은 이동하지 않는 상태가 확인됨.
+- 원인 조사: `request.approve()` + 저장(`saveApprovalRequestPort.save()`, Spring Data JPA `save()`가 자체 트랜잭션으로 즉시 커밋)과, `transfer()`(`@DistributedLock` → `AopForTransaction`의 `REQUIRES_NEW`로 완전히 별도 트랜잭션)가 서로 롤백 연결고리 없이 분리되어 있어, `transfer()`가 어떤 예외(이상거래뿐 아니라 `InsufficientBalanceException` 등도 동일 구조)로 실패하든 이미 커밋된 승인 상태는 그대로 남는 구조적 문제로 확인.
+
+**설계 결정**
+
+- 승인 워크플로 상태(`status`)는 그대로 두고, 별도 `executionStatus`(`NOT_APPLICABLE`/`EXECUTED`/`FAILED`) + `executionFailureReason` 필드로 "승인 행위 자체는 유효했다"와 "그 승인의 집행이 실패했다"를 분리 — 감사 관점에서 체커가 승인한 사실 자체를 지우지 않는 쪽을 택함(대안으로 `approve()` 전체를 하나의 트랜잭션으로 묶어 실행 실패 시 승인 상태까지 롤백하는 방안도 검토했으나, 그 경우 승인 행위의 흔적 자체가 사라져 기각).
+- `executionStatus` 갱신 저장에 `REQUIRES_NEW`/`AopForTransaction`은 불필요 — `saveApprovalRequestPort.save()`가 호출하는 Spring Data JPA `save()` 자체가 이미 독립 트랜잭션이고, `approve()`엔 애초에 감쌀 외부 트랜잭션이 없어 분리할 대상이 없음.
+- 재시도 API(집행 실패 건을 다시 실행시키는 것)는 이번 스코프에서 의도적으로 제외(YAGNI) — 아래 "다음 작업" 참고.
+
+**구현 내용**
+
+- `domain.model.ExecutionStatus`(신규 enum) / `TransferApprovalRequest.markExecuted()`·`markExecutionFailed(String reason)` — 기존 `approve()`/`reject()`와 동일한 캡슐화 패턴(메서드로만 상태 전이).
+- `ApproveTransferService.approve()` — `transfer()` 호출을 try-catch로 감싸 성공 시 `markExecuted()`, 실패 시 `markExecutionFailed(e.getMessage())` 저장 후 원래 예외를 그대로 rethrow(호출자에게 보이는 예외 타입/메시지는 기존과 동일하게 유지). `executionStatus` 저장 자체가 실패하는 2차 예외는 로그만 남기고 삼킴 — 원래 예외를 덮어쓰지 않음.
+- `TransferApprovalRequestJpaEntity`/`ApprovalRequestMapper` — `execution_status`(`NOT NULL`)/`execution_failure_reason`(nullable) 컬럼 매핑 추가. 이 프로젝트는 Flyway/Liquibase 미사용이라 배포 시 수동 DDL 필요(`docs/DEPLOYMENT.md` "스키마 변경이 포함된 배포" 섹션에 반영).
+
+**테스트**
+
+- `TransferApprovalRequestTest`(도메인 단위) — PENDING/REJECTED 상태에서 `executionStatus`가 `NOT_APPLICABLE`로 유지되는지, `markExecuted()`/`markExecutionFailed()` 각각의 상태 전이 4건 추가.
+- `ApproveTransferTriggersFraudCheckIntegrationTest` — 이상거래로 막힌 건이 `status=APPROVED` + `executionStatus=FAILED`로 남는지 검증 추가(기존 예외 발생 검증은 유지).
+- `ApproveTransferBypassesWebGateIntegrationTest` — 성공 건이 `status=APPROVED` + `executionStatus=EXECUTED`로 남는지 검증 추가.
+- 전체 테스트(`./gradlew test`) 132개 통과(기존 128 + 신규 4), `./gradlew spotlessCheck` 통과.
+
+### 과제 24: Swagger(springdoc-openapi) 도입 (완료)
+
+브랜치: `feat/add-swagger-openapi` → `develop` (PR #54)
+
+**배경**
+
+- API 문서화 수단이 전혀 없어 Postman으로 직접 캡처해가며 API를 파악해야 했음. Postman 캡처를 대체할 인터랙티브 API 문서로 Swagger UI 도입.
+
+**구현 내용**
+
+- `build.gradle`에 `springdoc-openapi-starter-webmvc-ui:3.1.0` 추가 — Spring Boot 4.0.7과 호환되는 최신 버전(Maven Central `maven-metadata.xml`로 직접 확인, 2026-08-01 릴리스).
+- `global.config.OpenApiConfig` — 최소한의 `OpenAPI` 빈(title/version)만 등록. 엔드포인트별 `@Operation`/`@Schema` 문서화는 이번 스코프 아님.
+- Spring Security가 아직 프로젝트에 없어 별도 `permitAll` 설정 없이 `/swagger-ui/**`, `/v3/api-docs/**`가 바로 열림 — 추후 Security 도입 시 허용 목록에 추가 필요.
+
+**검증**
+
+- `./gradlew compileJava`/`spotlessCheck` 통과, 로컬 `bootRun`으로 실기동 확인(`GET /v3/api-docs` → 200, `GET /swagger-ui/index.html` → 200).
+
 ## 🚧 다음 작업
 
-- (보류) 승인은 됐으나 집행(실제 이체) 실패한 건의 재시도 정책 — `fix/decouple-approval-status-from-execution-result`에서 `TransferApprovalRequest.executionStatus`(NOT_APPLICABLE/EXECUTED/FAILED)로 "승인 행위"와 "집행 결과"를 분리했지만, `executionStatus=FAILED`로 남은 건을 재시도시킬 API/운영 절차는 이번 스코프에서 의도적으로 제외(YAGNI). 재시도 API 필요 시: 같은 요청을 다시 집행할지, 아니면 신규 승인 요청을 처음부터 다시 만들게 할지부터 결정 필요.
+- (보류) 승인은 됐으나 집행(실제 이체) 실패한 건의 재시도 정책 — 과제 23에서 `TransferApprovalRequest.executionStatus`(NOT_APPLICABLE/EXECUTED/FAILED)로 "승인 행위"와 "집행 결과"를 분리했지만, `executionStatus=FAILED`로 남은 건을 재시도시킬 API/운영 절차는 이번 스코프에서 의도적으로 제외(YAGNI). 재시도 API 필요 시: 같은 요청을 다시 집행할지, 아니면 신규 승인 요청을 처음부터 다시 만들게 할지부터 결정 필요.
+- CI 파이프라인 부재 — GitHub Actions로 PR마다 `./gradlew test` 자동 실행하는 게 없어, 지금까지는 사람이 매번 로그를 직접 요구해서 확인. "재현 가능한 품질 관리"를 위해 다음 세션 우선순위로 권장.
+- 엔드포인트별 Swagger `@Operation`/`@Schema` 문서화 — 과제 24에서 최소 설정만 도입, 상세 문서화는 제외(YAGNI).
 - 트랙 3(장애 복구 & 카오스 엔지니어링) 두 과제(Kafka DLQ, Resilience4j) 완료 — 3개 트랙(실시간 트랜잭션/EOD 배치/장애복구) 모두 핵심 구현 최소 1개 이상 완료.
 - (협업 필요) Chaos Mesh 인프라 결함 주입 — 노션 "프로젝트 개요"상 Infra(김준희) 담당 업무. 백엔드가 처음부터 CRD/클러스터까지 다 짜는 게 아니라, "어떤 장애 시나리오로 무엇(서킷 브레이커/재시도 등)을 검증할지"를 먼저 정의해 인프라 담당자와 공유하고, 실제 장애 주입 후 애플리케이션 반응을 검증하는 역할 분담으로 진행할 것
 - (보류) 실제 Kafka 브로커 기반 재시도 토픽 → DLT 라우팅 통합 테스트 (과제 11에서 범위 분리)
