@@ -230,6 +230,18 @@ com.fbrl
 - `adapter.in.batch.ReconciliationJobConfig`/`ReconciliationItemWriter` — 별도 `reconciliationJob`, reader는 기존 `AccountItemReader` 재사용(새 `@StepScope` 빈으로만 재선언).
 - `adapter.in.scheduler.ReconciliationScheduler` — `${reconciliation.batch.cron:0 0 3 * * *}`(EOD 이후 시각), ShedLock `@SchedulerLock(name = "reconciliationJob")`.
 
+### 14. 승인 상태(status)와 이체 집행 결과(executionStatus) 분리 — 완료
+
+**문제 상황**: `ApproveTransferService.approve()`는 `request.approve()` + 저장(즉시 커밋되는 독립 트랜잭션)을 먼저 확정한 뒤, 별도 트랜잭션(`TransferMoneyService.transfer()`의 `@DistributedLock` → `AopForTransaction`의 `REQUIRES_NEW`)에서 실제 자금 이동을 시도한다. 두 트랜잭션 사이엔 롤백 연결고리가 없어서, `transfer()`가 이상거래 탐지·잔액 부족 등 어떤 예외로 실패하든 이미 커밋된 승인 상태(`status=APPROVED`)는 그대로 남아 "승인은 됐는데 돈은 안 움직였다"는 사실이 기록에서 사라지는 문제가 실사용 중 재현됨.
+
+**수정 방향 옵션 비교**: (a) `approve()` 전체를 하나의 `@Transactional`로 묶어 `transfer()` 실패 시 승인 상태까지 롤백 — 데이터 정합성은 깔끔해지지만, `transfer()`는 이미 `REQUIRES_NEW`가 걸려 있어 예외가 outer 트랜잭션까지 전파되면 `request.approve()`가 만든 변경 자체가 DB에 반영되지 않고 통째로 사라짐. 감사 관점에서 "체커가 실제로 승인 버튼을 눌렀다"는 행위 자체의 흔적이 없어지는 게 이 프로젝트의 감사로그 철학(과제 15 해시체인 등)과 맞지 않아 기각. (b) 승인 워크플로 상태(`status`)와 집행 결과(`executionStatus`)를 별도 필드로 분리해 둘 다 보존 — **채택**.
+
+**구현**: `TransferApprovalRequest`에 `executionStatus`(`NOT_APPLICABLE`/`EXECUTED`/`FAILED`) + `executionFailureReason` 필드를 추가하고, 기존 `approve()`/`reject()`와 동일한 캡슐화 패턴(`markExecuted()`/`markExecutionFailed(reason)`, 메서드로만 상태 전이)을 따름. `ApproveTransferService.approve()`는 `transfer()` 호출을 try-catch로 감싸 성공/실패에 따라 `executionStatus`를 갱신하고, 실패 시 원래 예외를 그대로 rethrow(호출자 계약 유지). `executionStatus` 저장 자체가 실패하는 2차 예외는 로그만 남기고 원래 예외를 덮어쓰지 않음.
+
+**REQUIRES_NEW 불필요 판단**: `executionStatus` 갱신 저장(`saveApprovalRequestPort.save()`)이 호출하는 Spring Data JPA `save()`는 `SimpleJpaRepository` 레벨에서 이미 자체 트랜잭션으로 커밋된다. `approve()` 자체엔 `@Transactional`이 없어 감쌀 외부 트랜잭션이 존재하지 않으므로, `transfer()`처럼 `REQUIRES_NEW`로 분리할 대상 자체가 없음 — 기존 `AopForTransaction` 패턴을 그대로 가져다 쓸 필요가 없다고 판단.
+
+**재시도 정책은 스코프 밖**: `executionStatus=FAILED`로 남은 건을 재실행시키는 API/운영 절차는 YAGNI로 이번 스코프에서 제외 — `PROGRESS.md` "다음 작업" 참고.
+
 ---
 
 각 결정의 배경/트러블슈팅 전체 기록은 [`PROGRESS.md`](./PROGRESS.md)를 참고하세요.

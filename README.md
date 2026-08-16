@@ -16,6 +16,7 @@
 | Batch | Spring Batch 6.0.4 |
 | 분산 스케줄링 | ShedLock 7.7.0, Kubernetes Lease API (client-java 27.0.0) |
 | 관측성 | Micrometer Tracing (OpenTelemetry bridge), Jaeger (로컬 트레이스 뷰어, OTLP 수신) |
+| API 문서화 | springdoc-openapi (Swagger UI) |
 | Build | Gradle |
 
 ## 아키텍처
@@ -86,7 +87,7 @@ graph TB
 - Saga 오케스트레이션 (`TransferSaga` 상태 머신 + 보상 트랜잭션, Choreography 대신 Orchestration 채택)
 - 복식부기 원장(`LedgerEntry`, append-only) — 계좌 잔액을 저장 필드가 아닌 원장 합산 파생값(SSOT)으로 전환, 거래 단위 대차평형은 `LedgerEntry.transferPair`로 구조적 보장
 - 분산 트레이싱 (Micrometer Tracing + OpenTelemetry bridge) — HTTP 요청 → Saga 각 단계 → Outbox 저장 → Debezium CDC → Kafka Consumer(재시도 토픽 포함)까지 하나의 trace_id로 연결. Outbox 전용 컬럼(`trace_id`/`span_id`)에 담아 Debezium EventRouter SMT로 Kafka 헤더에 실어 전파(감사로그 해시체인 계산 대상에서는 제외)
-- Maker-Checker(이중 승인, 4-eyes principle) — 금액 threshold 이상 이체는 `TransferMoneyController`에서 즉시 차단되고, `TransferApprovalController`(`/api/v1/transfer-approvals`)를 통한 별도 기안(Maker)/승인(Checker) 절차를 거쳐야만 실제 자금 이동이 시작됨
+- Maker-Checker(이중 승인, 4-eyes principle) — 금액 threshold 이상 이체는 `TransferMoneyController`에서 즉시 차단되고, `TransferApprovalController`(`/api/v1/transfer-approvals`)를 통한 별도 기안(Maker)/승인(Checker) 절차를 거쳐야만 실제 자금 이동이 시작됨. 승인 워크플로 상태(`status`)와 실제 자금 이동 결과(`executionStatus`)는 별도 필드로 분리되어 있어, 승인 후 집행이 실패해도(이상거래 탐지 등) "승인 행위가 있었다"는 사실과 "그 집행은 실패했다"는 사실을 각각 명시적으로 확인할 수 있음
 - 룰 기반 이상거래 탐지 (`FraudCheckPort`) — 단건 금액이 threshold를 초과하면 `SuspiciousTransferException`으로 이체를 즉시 차단. `TransferMoneyService.transfer()` 내부(기존 `@DistributedLock` 안쪽)에 위치해, 직접 이체(`TransferMoneyController`)와 Maker-Checker 승인 후 트리거(`ApproveTransferService`) 두 경로 모두에서 우회 없이 적용됨
 
 ### 트랙 2 — EOD 대규모 정산 배치
@@ -113,6 +114,7 @@ curl -X POST -H "Content-Type: application/json" \
 ```
 
 - 계좌 개설/조회, 이체 API는 `localhost:8080`에서 확인할 수 있습니다.
+- API 명세는 Swagger UI(`http://localhost:8080/swagger-ui/index.html`)에서 확인할 수 있습니다. Spring Security가 아직 없어 별도 인증 없이 열립니다.
 - 감사로그 체인 무결성은 `GET /api/v1/audit/verify`로 확인할 수 있습니다 (`{"valid":true,"totalEntries":N}`, 변조 시 `brokenAtId`/`reason` 포함).
 - 분산 트레이스는 Jaeger UI(`http://localhost:16686`)에서 확인할 수 있습니다. 기본 샘플링은 100%(`management.tracing.sampling.probability: 1.0`)이며, OTLP 엔드포인트는 `application.yaml`의 `management.opentelemetry.tracing.export.otlp.endpoint`에서 로컬 Jaeger를 가리킵니다(실제 배포 환경 OTLP Collector 엔드포인트는 미정 — Infra 협의 필요).
 - EOD 정산 배치는 기본적으로 자동 실행되지 않습니다 (`spring.batch.job.enabled: false`) — 파드 재시작 시 중복 실행을 방지하기 위함이며, `EodSettlementScheduler`의 cron 설정(`eod.batch.cron`)을 통해 트리거됩니다.
