@@ -1,18 +1,23 @@
 package com.fbrl.adapter.out.persistence;
 
+import com.fbrl.application.port.out.LoadLedgerBalanceDeltasPort;
 import com.fbrl.application.port.out.LoadLedgerEntriesPort;
 import com.fbrl.application.port.out.SaveLedgerEntryPort;
 import com.fbrl.domain.exception.LedgerPersistenceException;
+import com.fbrl.domain.model.LedgerBalanceDelta;
 import com.fbrl.domain.model.LedgerDirection;
 import com.fbrl.domain.model.LedgerEntry;
 import com.fbrl.domain.model.Money;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Component;
 
 @Component
-public class LedgerEntryPersistenceAdapter implements SaveLedgerEntryPort, LoadLedgerEntriesPort {
+public class LedgerEntryPersistenceAdapter
+    implements SaveLedgerEntryPort, LoadLedgerEntriesPort, LoadLedgerBalanceDeltasPort {
 
   private final LedgerEntryJpaRepository ledgerEntryJpaRepository;
   private final LedgerEntryMapper ledgerEntryMapper;
@@ -55,6 +60,30 @@ public class LedgerEntryPersistenceAdapter implements SaveLedgerEntryPort, LoadL
       return Money.of(ledgerEntryJpaRepository.sumAmountByDirection(direction));
     } catch (DataAccessException e) {
       throw new LedgerPersistenceException("원장 합계 조회 중 인프라 예외가 발생했습니다.", e);
+    }
+  }
+
+  @Override
+  public Map<String, LedgerBalanceDelta> loadBalanceDeltasUntil(
+      List<String> accountNumbers, Instant until) {
+    try {
+      Map<String, LedgerBalanceDelta> deltasByAccountNumber = new HashMap<>();
+      for (String accountNumber : accountNumbers) {
+        deltasByAccountNumber.put(accountNumber, new LedgerBalanceDelta(Money.ZERO, Money.ZERO));
+      }
+
+      List<LedgerBalanceDeltaProjection> rows =
+          ledgerEntryJpaRepository.sumBalanceDeltasUntil(
+              accountNumbers, until, LedgerDirection.CREDIT, LedgerDirection.DEBIT);
+      for (LedgerBalanceDeltaProjection row : rows) {
+        deltasByAccountNumber.put(
+            row.accountNumber(),
+            new LedgerBalanceDelta(Money.of(row.creditTotal()), Money.of(row.debitTotal())));
+      }
+
+      return deltasByAccountNumber;
+    } catch (DataAccessException e) {
+      throw new LedgerPersistenceException("계좌별 원장 델타 조회 중 인프라 예외가 발생했습니다.", e);
     }
   }
 
