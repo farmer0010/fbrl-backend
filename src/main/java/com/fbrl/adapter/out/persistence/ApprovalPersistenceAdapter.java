@@ -1,14 +1,18 @@
 package com.fbrl.adapter.out.persistence;
 
 import com.fbrl.application.port.out.LoadApprovalRequestPort;
+import com.fbrl.application.port.out.PagedResult;
 import com.fbrl.application.port.out.SaveApprovalRequestPort;
 import com.fbrl.domain.exception.ApprovalPersistenceException;
 import com.fbrl.domain.exception.ConcurrentApprovalModificationException;
 import com.fbrl.domain.model.ApprovalStatus;
 import com.fbrl.domain.model.TransferApprovalRequest;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.dao.DataAccessException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Component;
 
@@ -53,6 +57,16 @@ public class ApprovalPersistenceAdapter
     return transferApprovalRequestJpaRepository.findByStatus(status).stream()
         .map(approvalRequestMapper::toDomain)
         .toList();
+  }
+
+  @Override
+  public PagedResult<TransferApprovalRequest> search(
+      ApprovalStatus status, Instant from, Instant to, int page, int size) {
+    Page<TransferApprovalRequestJpaEntity> result =
+        transferApprovalRequestJpaRepository.search(status, from, to, PageRequest.of(page, size));
+    List<TransferApprovalRequest> items =
+        result.getContent().stream().map(approvalRequestMapper::toDomain).toList();
+    return new PagedResult<>(items, result.getTotalElements());
   }
 
   public void deleteAllInBatch() {

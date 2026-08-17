@@ -9,6 +9,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.fbrl.application.port.in.CreateAccountUseCase;
 import com.fbrl.application.port.in.GetAccountUseCase;
 import com.fbrl.application.port.in.GetAccountUseCase.AccountDetail;
+import com.fbrl.application.port.in.GetLedgerEntriesUseCase;
 import com.fbrl.domain.exception.AccountNotFoundException;
 import com.fbrl.domain.model.Account;
 import com.fbrl.domain.model.Money;
@@ -25,14 +26,17 @@ class AccountControllerTest {
   private MockMvc mockMvc;
   private CreateAccountUseCase createAccountUseCase;
   private GetAccountUseCase getAccountUseCase;
+  private GetLedgerEntriesUseCase getLedgerEntriesUseCase;
 
   @BeforeEach
   void setUp() {
     createAccountUseCase = Mockito.mock(CreateAccountUseCase.class);
     getAccountUseCase = Mockito.mock(GetAccountUseCase.class);
+    getLedgerEntriesUseCase = Mockito.mock(GetLedgerEntriesUseCase.class);
     mockMvc =
         MockMvcBuilders.standaloneSetup(
-                new AccountController(createAccountUseCase, getAccountUseCase))
+                new AccountController(
+                    createAccountUseCase, getAccountUseCase, getLedgerEntriesUseCase))
             .setControllerAdvice(new GlobalExceptionHandler())
             .build();
   }

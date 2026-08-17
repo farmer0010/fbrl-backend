@@ -327,4 +327,60 @@ class TransferApprovalControllerTest {
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("SELF_APPROVAL_NOT_ALLOWED"));
   }
+
+  @Test
+  @DisplayName("status/기간 필터로 이력을 조회하면 해당 조건에 맞는 페이지를 반환한다.")
+  void search_withFilters_returnsMatchingPage() throws Exception {
+    TransferApprovalRequest pending =
+        TransferApprovalRequest.request(MAKER_USERNAME, SENDER, RECEIVER, Money.wons(20_000_000));
+    approvalPersistenceAdapter.save(pending);
+    TransferApprovalRequest rejected =
+        TransferApprovalRequest.request(MAKER_USERNAME, SENDER, RECEIVER, Money.wons(20_000_000));
+    rejected.reject(CHECKER_USERNAME, "한도 초과 우려");
+    approvalPersistenceAdapter.save(rejected);
+
+    mockMvc
+        .perform(
+            get("/api/v1/transfer-approvals")
+                .header(HttpHeaders.AUTHORIZATION, bearer(checkerToken))
+                .param("status", "PENDING")
+                .param("from", Instant.now().minusSeconds(60).toString())
+                .param("to", Instant.now().plusSeconds(60).toString()))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.totalElements").value(1))
+        .andExpect(jsonPath("$.content[0].requestId").value(pending.getRequestId()))
+        .andExpect(jsonPath("$.content[0].status").value("PENDING"));
+  }
+
+  @Test
+  @DisplayName("토큰 없이 이력 조회를 시도하면 401을 반환한다.")
+  void search_withoutToken_returns401() throws Exception {
+    mockMvc
+        .perform(
+            get("/api/v1/transfer-approvals")
+                .param("from", Instant.now().minusSeconds(60).toString())
+                .param("to", Instant.now().toString()))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+  }
+
+  @Test
+  @DisplayName("전체 건수보다 큰 페이지를 요청하면 빈 content를 반환하되 totalElements는 정확하다.")
+  void search_pageBeyondTotal_returnsEmptyContent() throws Exception {
+    TransferApprovalRequest pending =
+        TransferApprovalRequest.request(MAKER_USERNAME, SENDER, RECEIVER, Money.wons(20_000_000));
+    approvalPersistenceAdapter.save(pending);
+
+    mockMvc
+        .perform(
+            get("/api/v1/transfer-approvals")
+                .header(HttpHeaders.AUTHORIZATION, bearer(checkerToken))
+                .param("from", Instant.now().minusSeconds(60).toString())
+                .param("to", Instant.now().plusSeconds(60).toString())
+                .param("page", "5")
+                .param("size", "20"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.content").isEmpty())
+        .andExpect(jsonPath("$.totalElements").value(1));
+  }
 }
