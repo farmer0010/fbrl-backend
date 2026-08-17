@@ -695,6 +695,29 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 
 - `./gradlew compileJava`/`spotlessCheck` 통과, 로컬 `bootRun`으로 실기동 확인(`GET /v3/api-docs` → 200, `GET /swagger-ui/index.html` → 200).
 
+### 과제 25: makerId/checkerId를 인증 컨텍스트로 연결 (완료)
+
+브랜치: `feat/wire-authenticated-principal-to-approval-workflow` → `develop`
+
+**배경**
+
+- 과제 19(Maker-Checker)에서 승인 워크플로를 도입했을 때는 아직 인증 인프라가 없어 `makerId`/`checkerId`를 요청 본문에서 그대로 받는 구조였음(호출자가 아무 문자열이나 넣을 수 있어 자기승인 방지도 신뢰할 수 없었음). 그 사이 관리자 인증 인프라(AdminUser/JWT, `feat/auth-infrastructure`)가 먼저 들어오면서, 승인 워크플로 3개 엔드포인트가 여전히 요청 본문으로 신원을 받는 게 인증 인프라 도입 취지와 어긋나는 상태로 남아 있었음.
+
+**구현 내용**
+
+- `RequestTransferApprovalRequest`/`RejectTransferRequest`에서 makerId/checkerId 필드 제거, `toCommand()`가 인증된 사용자명을 파라미터로 받도록 변경. `ApproveTransferRequest`는 필드가 checkerId뿐이라 빈 DTO만 남아 삭제 — `approve()`는 `@RequestBody` 없이 `Authentication`만 받음.
+- `TransferApprovalController`의 `requestApproval()`/`approve()`/`reject()` 세 메서드 모두 `Authentication` 파라미터를 추가해 `authentication.getName()`(JWT `sub` = `AdminUser.username`)으로 Command를 채움. `ApproveTransferCommand`/`RejectTransferCommand`/`RequestTransferApprovalCommand` 시그니처 자체는 유지 — application/domain 계층 변경 최소화.
+- `OpenApiConfig`에 `bearerAuth` `SecurityScheme` + 전역 `SecurityRequirement` 등록, Swagger UI에서 인증 필요 엔드포인트가 자물쇠 아이콘으로 표시되도록 함.
+
+**테스트**
+
+- `TransferApprovalControllerTest`를 mock 기반 standalone 테스트에서 `@SpringBootTest`+`@AutoConfigureMockMvc`로 전환 — `@WithMockUser`는 이 프로젝트 필터 체인에 반영되지 않는다는 게 이미 확인된 사실(`IdempotencyIntegrationTest` 사례)이라, `LoginIntegrationTest`처럼 실제 `/api/v1/auth/login`으로 발급받은 JWT를 `Authorization` 헤더에 실어 검증.
+- 자기승인 방지를 "손으로 다르게 넣은 문자열 비교"가 아니라 같은 로그인 세션으로 기안 후 그 세션 그대로 승인/거절을 시도해 `SelfApprovalNotAllowedException`(400)이 재현되는지 검증(`approveBySameLoginSession_isRejectedAsSelfApproval`, `rejectBySameLoginSession_isRejectedAsSelfApproval`). 서로 다른 두 관리자 계정으로 기안/승인·거절 시 정상 처리되고 `checkerId`/`rejectionReason`이 실제로 저장되는지도 함께 검증.
+- `ApproveTransferBypassesWebGateIntegrationTest`/`ApproveTransferTriggersFraudCheckIntegrationTest`는 컨트롤러를 거치지 않고 `ApproveTransferService`를 직접 호출하는 구조라 Authentication과 무관 — Command 시그니처가 유지되므로 변경 없음.
+- 전체 테스트(`./gradlew test`) 145개 통과, `./gradlew spotlessCheck` 통과.
+
+**설계 결정**: Command의 makerId/checkerId가 "인증된 신원"이라는 보장이 컨트롤러(웹 어댑터)에서만 성립하고 application/domain 계층엔 이를 강제하는 코드가 없다는 점을 `ARCHITECTURE.md` 결정 15번으로 기록 — 자세한 내용은 [`ARCHITECTURE.md`](./ARCHITECTURE.md) 참고.
+
 ## 🚧 다음 작업
 
 - (보류) 승인은 됐으나 집행(실제 이체) 실패한 건의 재시도 정책 — 과제 23에서 `TransferApprovalRequest.executionStatus`(NOT_APPLICABLE/EXECUTED/FAILED)로 "승인 행위"와 "집행 결과"를 분리했지만, `executionStatus=FAILED`로 남은 건을 재시도시킬 API/운영 절차는 이번 스코프에서 의도적으로 제외(YAGNI). 재시도 API 필요 시: 같은 요청을 다시 집행할지, 아니면 신규 승인 요청을 처음부터 다시 만들게 할지부터 결정 필요.
@@ -762,4 +785,4 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 
 ---
 
-마지막 업데이트: 2026-08-16
+마지막 업데이트: 2026-08-17
