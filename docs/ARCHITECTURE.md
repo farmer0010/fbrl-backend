@@ -23,7 +23,7 @@ com.fbrl
 │   └── service        # UseCase 구현체 (CreateAccountService, TransferSagaOrchestrator, VerifyAuditChainService, ...)
 ├── adapter
 │   ├── in
-│   │   ├── web         # AccountController, TransferMoneyController, TransferApprovalController, AuditController, GlobalExceptionHandler
+│   │   ├── web         # AccountController, TransferMoneyController, TransferApprovalController, ReconciliationDiscrepancyController, EodSnapshotController, AuthController, AuditController, GlobalExceptionHandler
 │   │   ├── kafka        # TransferEventConsumer, KafkaRetryTopicConfig
 │   │   ├── batch         # EodSettlementJobConfig, AccountItemReader/Processor/Writer, ReconciliationJobConfig/ItemWriter
 │   │   └── scheduler      # EodSettlementScheduler, ReconciliationScheduler
@@ -257,6 +257,18 @@ com.fbrl
 **근거**: 이 프로젝트가 도입한 4-eyes principle(과제 19 Maker-Checker)의 핵심은 "기안자와 승인자가 달라야 한다"는 자기승인 방지(`assertNotSelfApproval`)로 이미 충분히 달성된다 — 이는 역할(Role) 기반이 아니라 행위 주체가 같은지 다른지를 보는 것이라, "누가 기안하고 누가 승인할 수 있는가"를 역할로 세분화할 필요 자체가 없다. `domain.model.AdminRole`도 실제로 `ADMIN` 단일 값만 가진 enum이라, 역할 분기를 추가하는 건 이 프로젝트 스코프(1인/2인 협업, 관리자 화면 하나)에서 과설계로 판단했다.
 
 **적용 범위**: 승인 요청 이력, Reconciliation 불일치 목록, 계좌별 원장, EOD 스냅샷, 배치 Job 이력, Outbox 이벤트 목록 등 신규 조회 API 전부 — 인증(로그인 여부)만 검사하고 인가(역할별 접근 제어)는 두지 않는다. 역할 세분화가 실제로 필요해지는 시점(예: 조회 전용 역할과 승인 가능 역할을 분리해야 하는 요구가 생길 때)이 오면 그때 `AdminRole`에 값을 추가하고 `SecurityConfig`에 경로별 `hasRole(...)` 분기를 넣는 것으로 확장한다(YAGNI).
+
+### 17. 관리자 조회 API 공통 페이지네이션 — Page&lt;T&gt;는 어댑터 내부로 한정
+
+**결정 사항**: 관리자 조회 API 전체가 `application.port.out.PagedResult<T>(List<T> items, long totalElements)`(프레임워크 타입 없는 record)를 Port 반환 타입으로 쓰고, 컨트롤러는 이를 `adapter.in.web.dto.PageResponse<T>(content, totalElements, page, size, totalPages)`로 변환해 응답한다. Spring Data의 `Pageable`/`Page<T>`는 `adapter.out.persistence` 안에서만 쓰고 그 경계를 절대 넘기지 않는다.
+
+**대안 비교**: (a) `Page<T>`를 Port/컨트롤러까지 그대로 노출 — 구현이 가장 빠르지만, 이 프로젝트가 `EntityManager`/K8s Java Client 타입을 Port 시그니처에서 명시적으로 금지한 것과 같은 이유로 어긋남. `PageImpl`의 Jackson 직렬화 형태도 Spring Data 버전에 따라 흔들리는 걸로 잘 알려져 있어 API 계약으로 삼기에 불안정. (b) `PagedResult<T>`/`PageResponse<T>` 자체 래퍼 — **채택**.
+
+**선택 이유**: `LoadAllAccountsPort.loadAccounts(page, size)`(과제 10, `AccountItemReader`가 쓰는 배치 전용 페이징 포트)가 이미 Spring Data 타입 없이 순수 `List<T>` + 정수 `page`/`size`만으로 페이징을 표현해온 전례가 있음 — 다만 그 포트는 total count가 필요 없는 배치 리더 전용이라 관리자 조회 API에는 그대로 재사용할 수 없었음(프론트엔드 페이지네이션 UI는 전체 건수가 필요). `PagedResult<T>`는 그 전례의 "Port엔 프레임워크 타입 금지" 원칙은 유지하면서 `totalElements`만 추가한 형태.
+
+**구현 위치**: JPA 리포지토리(`*JpaRepository`)는 `Pageable pageable` 파라미터를 받아 `Page<T>`를 반환(Spring Data가 공짜로 제공) → `*PersistenceAdapter`가 `Page<T>.getContent()`/`getTotalElements()`를 읽어 `PagedResult<T>`로 변환 → 컨트롤러가 `PageResponse.of(content, totalElements, page, size)`로 최종 변환. `*Mapper`가 도메인 ↔ JPA 엔티티를 변환하는 기존 컨벤션과 동형으로, 계층 경계마다 번역 책임이 있는 구조.
+
+**적용 현황**: 승인 요청 이력(`LoadApprovalRequestPort.search`), Reconciliation 불일치 목록(`LoadReconciliationDiscrepancyPort.search`), 계좌별 원장(`LoadLedgerEntriesPort.loadByAccountNumberAndPeriod`), EOD 스냅샷(`LoadEodSnapshotHistoryPort.byAccountNumber`/`byDate`) — 전부 동일 패턴.
 
 ---
 

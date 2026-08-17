@@ -9,6 +9,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.fbrl.application.port.in.CreateAccountUseCase;
 import com.fbrl.application.port.in.GetAccountUseCase;
 import com.fbrl.application.port.in.GetAccountUseCase.AccountDetail;
+import com.fbrl.application.port.in.GetEodSnapshotHistoryUseCase;
 import com.fbrl.application.port.in.GetLedgerEntriesUseCase;
 import com.fbrl.domain.exception.AccountNotFoundException;
 import com.fbrl.domain.model.Account;
@@ -27,16 +28,21 @@ class AccountControllerTest {
   private CreateAccountUseCase createAccountUseCase;
   private GetAccountUseCase getAccountUseCase;
   private GetLedgerEntriesUseCase getLedgerEntriesUseCase;
+  private GetEodSnapshotHistoryUseCase getEodSnapshotHistoryUseCase;
 
   @BeforeEach
   void setUp() {
     createAccountUseCase = Mockito.mock(CreateAccountUseCase.class);
     getAccountUseCase = Mockito.mock(GetAccountUseCase.class);
     getLedgerEntriesUseCase = Mockito.mock(GetLedgerEntriesUseCase.class);
+    getEodSnapshotHistoryUseCase = Mockito.mock(GetEodSnapshotHistoryUseCase.class);
     mockMvc =
         MockMvcBuilders.standaloneSetup(
                 new AccountController(
-                    createAccountUseCase, getAccountUseCase, getLedgerEntriesUseCase))
+                    createAccountUseCase,
+                    getAccountUseCase,
+                    getLedgerEntriesUseCase,
+                    getEodSnapshotHistoryUseCase))
             .setControllerAdvice(new GlobalExceptionHandler())
             .build();
   }
