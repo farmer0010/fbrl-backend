@@ -10,4 +10,7 @@ public interface LoadLedgerEntriesPort {
   List<LedgerEntry> loadByAccountNumberSince(String accountNumber, Instant since);
 
   Money sumAmountByDirection(LedgerDirection direction);
+
+  PagedResult<LedgerEntry> loadByAccountNumberAndPeriod(
+      String accountNumber, Instant from, Instant to, int page, int size);
 }

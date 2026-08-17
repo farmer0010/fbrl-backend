@@ -4,6 +4,8 @@ import com.fbrl.domain.model.LedgerDirection;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -12,6 +14,9 @@ interface LedgerEntryJpaRepository extends JpaRepository<LedgerEntryJpaEntity, L
 
   List<LedgerEntryJpaEntity> findByAccountNumberAndOccurredAtGreaterThanEqual(
       String accountNumber, Instant since);
+
+  Page<LedgerEntryJpaEntity> findByAccountNumberAndOccurredAtBetween(
+      String accountNumber, Instant from, Instant to, Pageable pageable);
 
   @Query(
       "select coalesce(sum(l.amount), 0) from LedgerEntryJpaEntity l where l.direction = :direction")

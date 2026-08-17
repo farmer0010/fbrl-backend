@@ -2,6 +2,7 @@ package com.fbrl.adapter.out.persistence;
 
 import com.fbrl.application.port.out.LoadLedgerBalanceDeltasPort;
 import com.fbrl.application.port.out.LoadLedgerEntriesPort;
+import com.fbrl.application.port.out.PagedResult;
 import com.fbrl.application.port.out.SaveLedgerEntryPort;
 import com.fbrl.domain.exception.LedgerPersistenceException;
 import com.fbrl.domain.model.LedgerBalanceDelta;
@@ -13,6 +14,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.dao.DataAccessException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -49,6 +52,21 @@ public class LedgerEntryPersistenceAdapter
           .stream()
           .map(ledgerEntryMapper::toDomain)
           .toList();
+    } catch (DataAccessException e) {
+      throw new LedgerPersistenceException("원장 조회 중 인프라 예외가 발생했습니다.", e);
+    }
+  }
+
+  @Override
+  public PagedResult<LedgerEntry> loadByAccountNumberAndPeriod(
+      String accountNumber, Instant from, Instant to, int page, int size) {
+    try {
+      Page<LedgerEntryJpaEntity> result =
+          ledgerEntryJpaRepository.findByAccountNumberAndOccurredAtBetween(
+              accountNumber, from, to, PageRequest.of(page, size));
+      List<LedgerEntry> items =
+          result.getContent().stream().map(ledgerEntryMapper::toDomain).toList();
+      return new PagedResult<>(items, result.getTotalElements());
     } catch (DataAccessException e) {
       throw new LedgerPersistenceException("원장 조회 중 인프라 예외가 발생했습니다.", e);
     }
