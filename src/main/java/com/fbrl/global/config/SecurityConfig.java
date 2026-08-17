@@ -80,6 +80,7 @@ public class SecurityConfig {
   private void writeErrorResponse(HttpServletResponse response, int status, ErrorResponse body)
       throws java.io.IOException {
     response.setStatus(status);
+    response.setCharacterEncoding("UTF-8");
     response.setContentType(MediaType.APPLICATION_JSON_VALUE);
     response.getWriter().write(objectMapper.writeValueAsString(body));
   }
