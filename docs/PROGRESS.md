@@ -718,8 +718,68 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 
 **설계 결정**: Command의 makerId/checkerId가 "인증된 신원"이라는 보장이 컨트롤러(웹 어댑터)에서만 성립하고 application/domain 계층엔 이를 강제하는 코드가 없다는 점을 `ARCHITECTURE.md` 결정 15번으로 기록 — 자세한 내용은 [`ARCHITECTURE.md`](./ARCHITECTURE.md) 참고.
 
+### 과제 26: Security 에러 응답 UTF-8 인코딩 수정 (완료)
+
+브랜치: `chore/fix-error-response-charset` → `develop` (PR #62)
+
+**배경**
+
+- 관리자 조회 API 배치1의 curl 검증 도중, 인증 실패(401) 응답의 한글 메시지가 `?`로 깨져 나오는 걸 우연히 발견. `SecurityConfig.writeErrorResponse()`(401 `authenticationEntryPoint`/403 `accessDeniedHandler`가 공유하는 메서드)가 `response.setContentType()`만 호출하고 `setCharacterEncoding()`을 호출하지 않아, 서블릿 컨테이너가 플랫폼 기본 인코딩(ISO-8859-1)으로 응답 바디를 써서 한글이 깨졌음. `GlobalExceptionHandler`의 다른 에러 응답들은 `ResponseEntity` + Jackson `HttpMessageConverter` 경로라 이 문제와 무관.
+
+**구현 내용**
+
+- `writeErrorResponse()`에 `response.setCharacterEncoding("UTF-8")`을 `setContentType()`보다 먼저 호출하도록 추가. 401/403 두 핸들러가 이 메서드 하나를 공유하므로 한 줄 수정으로 둘 다 해결됨(403은 이 프로젝트에 역할 기반 인가 자체가 없어 실제로 트리거되지는 않지만 — 결정 16번 — 같은 코드 경로이므로 구조적으로 함께 고쳐짐).
+
+**테스트**
+
+- `LoginIntegrationTest`에 `protectedEndpoint_withoutToken_returnsUtf8EncodedErrorBody` 추가 — 응답 `Content-Type`에 `charset=UTF-8` 포함 여부와 한글 메시지 원문을 검증. 수정 전 코드로 되돌려 이 테스트가 실제로 실패하는 것까지 확인한 뒤 재적용(회귀 테스트가 실제로 회귀를 잡는지 검증).
+- `bootRun` 실기동 후 `xxd`로 raw 바이트 직접 확인 — 수정 전 `3f 3f 3f`(`?`)였던 자리가 수정 후 유효한 UTF-8 멀티바이트 시퀀스로 바뀜.
+- 전체 테스트 146개 통과.
+
+### 과제 27: 관리자 조회 API 배치1 — 승인이력/Reconciliation목록/원장조회 (완료)
+
+브랜치: `feat/admin-query-apis-batch1` → `develop` (PR #63)
+
+**배경**
+
+- 관리자 프론트엔드가 필요로 하는 조회(읽기 전용) API 6종을 1단계 조사 문서로 먼저 설계 확정한 뒤, 공통 패턴(페이지네이션/필터/날짜 타입/인증)을 하나로 정하고 6개 중 3개를 이번 배치에서 구현.
+
+**구현 내용**
+
+- `application.port.out.PagedResult<T>`(items, totalElements)/`adapter.in.web.dto.PageResponse<T>`(content/totalElements/page/size/totalPages) 신설 — `Pageable`/`Page<T>`는 `adapter.out.persistence` 내부로만 한정하고, Port/응답 계층엔 프레임워크 타입을 노출하지 않음(자세한 내용은 `ARCHITECTURE.md` 결정 17번 참고).
+- ① 승인 요청 이력: `LoadApprovalRequestPort.search()` 추가(기존 `loadByStatus`는 유지), `GET /api/v1/transfer-approvals`(status 선택 필터 + from/to `Instant` + page/size).
+- ② Reconciliation 불일치 목록: `LoadReconciliationDiscrepancyPort` 신규, `ReconciliationDiscrepancyController` 신규, `GET /api/v1/reconciliation-discrepancies`(status 선택 필터 + from/to `LocalDate`).
+- ③ 계좌별 원장 조회: `LoadLedgerEntriesPort.loadByAccountNumberAndPeriod()` 추가(기존 `loadByAccountNumberSince`는 Reconciliation 배치가 그대로 사용 중이라 유지), `AccountController`에 `GET /{accountNumber}/ledger-entries` 추가.
+- 전부 `SecurityConfig`의 기존 `anyRequest().authenticated()` 원칙 그대로 — 역할 세분화 없이 로그인 여부만 검사(`ARCHITECTURE.md` 결정 16번, 이번 과제에서 함께 기록).
+
+**테스트**
+
+- Port 구현체별로 필터 조합/기간 범위/페이지네이션 경계(전체 건수보다 큰 페이지 요청 시 빈 content) 검증.
+- 컨트롤러는 실제 로그인 세션(JWT)으로 200을 확인하고 인증 없이 호출 시 401도 함께 검증.
+- 전체 테스트 162개 통과.
+
+### 과제 28: 관리자 조회 API 배치2 — EOD 스냅샷 조회 (완료)
+
+브랜치: `feat/admin-query-apis-batch2` → `develop`
+
+**배경**
+
+- 배치1과 동일한 공통 패턴으로 6종 중 EOD 스냅샷 조회 2개(계좌별 히스토리 / 날짜별 전체 계좌)를 구현.
+
+**구현 내용**
+
+- `LoadEodSnapshotHistoryPort` 신규(`byAccountNumber`/`byDate`) — 기존 `LoadLatestEodSnapshotPort`(계좌 1개의 최신 스냅샷 1건, 잔액 계산 앵커용)와 `LoadEodSnapshotByDatePort`(계좌 목록 + 정확한 날짜 1개, Reconciliation 배치 전용 벌크 조회, `Map` 반환)는 이름은 비슷하지만 목적이 전혀 달라 손대지 않음.
+- `AccountController`에 `GET /{accountNumber}/eod-snapshots`(계좌 하위 자원 — 배치1의 `ledger-entries`와 동일 패턴으로 기존 컨트롤러에 귀속), 신규 `EodSnapshotController`에 `GET /api/v1/eod-snapshots?date=`(어떤 기존 프리픽스에도 속하지 않는 독립 최상위 자원 — 배치1의 `ReconciliationDiscrepancyController` 신설과 동일한 논리로 컨트롤러 분리).
+- nullable `LocalDate` 파라미터가 `IS NULL` 단독 위치에서 Postgres가 파라미터 타입을 추론하지 못하는 문제(`could not determine data type of parameter`)를 실제 테스트로 발견 — `cast(:param as date)`를 명시적으로 추가해 해결(배치1에서 같은 nullable-OR 패턴을 쓴 `ApprovalStatus`는 캐스트 없이도 통과했던 것과 대비됨, 트러블슈팅 섹션에 원인 기록).
+
+**테스트**
+
+- Port 구현체 테스트(전체 조회/기간 범위/`byDate`), 컨트롤러는 실제 로그인 세션 통합 테스트 + 인증 없이 401, 페이지네이션 경계.
+- 전체 테스트 174개 통과.
+
 ## 🚧 다음 작업
 
+- 관리자 조회 API 배치3(배치 Job 실행 이력, Outbox 감사로그 이벤트 목록) 남음 — 1단계 조사에서 확정한 6종 중 마지막 2개. 배치 Job 이력은 `JobExplorer`가 아니라 `JobRepository`로 구현할 것(Spring Batch 6.0부터 `JobExplorer`는 `@Deprecated(forRemoval = true)`, 읽기 기능은 `JobRepository`가 흡수함 — 아래 Reconciliation 게이트 항목도 동일 주의 필요).
 - (보류) 승인은 됐으나 집행(실제 이체) 실패한 건의 재시도 정책 — 과제 23에서 `TransferApprovalRequest.executionStatus`(NOT_APPLICABLE/EXECUTED/FAILED)로 "승인 행위"와 "집행 결과"를 분리했지만, `executionStatus=FAILED`로 남은 건을 재시도시킬 API/운영 절차는 이번 스코프에서 의도적으로 제외(YAGNI). 재시도 API 필요 시: 같은 요청을 다시 집행할지, 아니면 신규 승인 요청을 처음부터 다시 만들게 할지부터 결정 필요.
 - CI 파이프라인 부재 — GitHub Actions로 PR마다 `./gradlew test` 자동 실행하는 게 없어, 지금까지는 사람이 매번 로그를 직접 요구해서 확인. "재현 가능한 품질 관리"를 위해 다음 세션 우선순위로 권장.
 - 엔드포인트별 Swagger `@Operation`/`@Schema` 문서화 — 과제 24에서 최소 설정만 도입, 상세 문서화는 제외(YAGNI).
@@ -730,7 +790,7 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 - (보류) Debezium EventRouter SMT의 `table.fields.additional.placement`(trace_id/span_id 헤더 라우팅)를 커버하는 자동화된 통합 테스트 — 위 두 항목과 같은 이유(실제 Kafka 브로커 필요)로 보류, 현재는 로컬 수동 검증으로만 확인됨(과제 17 참고)
 - (보류) Testcontainers 기반 통합 테스트 재검증 — 프로젝트 전체가 docker-compose 기반 통합 테스트 컨벤션을 일관되게 쓰고 있어 현재는 도입 보류로 결정(Testcontainers는 이 컨벤션과 공존 시 일관성이 깨짐, YAGNI)
 - (권장) 실제 배포 대상 Postgres에 `accounts.balance` 컬럼 등 orphan 컬럼이 남아있다면 `ALTER TABLE ... DROP COLUMN`으로 별도 정리 필요(과제 16 참고, 이 프로젝트는 Flyway/Liquibase 미사용)
-- (보류) Reconciliation Job 레벨 사전 게이트(`JobExplorer`로 당일 `eodSettlementJob` 완료 여부를 확인 후 스킵) — 계좌별 `NO_SNAPSHOT` 분류만으로도 "EOD가 안 돌았다"는 사실이 이미 드러나므로 이번 스코프에서는 제외(YAGNI). 알림이 너무 많이 쌓여 노이즈가 문제되면 추가(과제 22 참고)
+- (보류) Reconciliation Job 레벨 사전 게이트(당일 `eodSettlementJob` 완료 여부를 확인 후 스킵, 구현 시 `JobExplorer`가 아니라 `JobRepository` 사용 — 위 배치3 항목 참고) — 계좌별 `NO_SNAPSHOT` 분류만으로도 "EOD가 안 돌았다"는 사실이 이미 드러나므로 이번 스코프에서는 제외(YAGNI). 알림이 너무 많이 쌓여 노이즈가 문제되면 추가(과제 22 참고)
 
 ## 🤖 AI 에이전트(Claude Code) 활용 방침
 
@@ -782,6 +842,8 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 - Flyway/Liquibase 없이 `ddl-auto: update`만 쓰는 프로젝트에서 엔티티 필드를 제거해도 물리 컬럼은 DROP되지 않고 NOT NULL 제약만 orphan으로 남아 INSERT가 깨질 수 있음 — 로컬 DB에 이전 브랜치/이전 스키마 잔재가 없는지 항상 의심할 것(과제 16)
 - 두 값(예: DEBIT/CREDIT 쌍)의 불변식을 지키려면 "따로 만들고 나중에 검증"(validate-after)보다 "애초에 어긋난 값을 만들 수 없는 시그니처"(invariant-by-construction, 예: `LedgerEntry.transferPair`가 두 다리에 동일 `Money` 인스턴스를 강제)가 더 신뢰도 높음
 - "존재하지 않아서 우연히 막히는" 방어(예: sentinel 계좌번호가 실제 row가 없어서 조회 실패로 차단됨)는 나중에 그 전제가 깨지면 조용히 무력화되므로, 알아챈 즉시 명시적 가드 클로즈 + 전용 도메인 예외로 전환할 것(과제 16, `ReservedAccountException`)
+- JPQL에서 `:param is null or column = :param` 패턴으로 nullable 필터를 구현할 때, `@Query`의 `countQuery`는 항상 명시적으로 같이 작성할 것(과제 27) — Spring Data의 자동 count 쿼리 유도가 조건절이 복잡해질수록 실패하거나 성능이 나빠질 수 있음. 또한 파라미터 타입에 따라 이 패턴 자체가 Postgres에서 깨질 수 있음: `LocalDate`처럼 `IS NULL` 단독 위치에서 타입을 추론할 문맥이 없는 파라미터는 `could not determine data type of parameter` 오류가 나므로 `cast(:param as date)`를 명시해야 함 — 반면 `@Enumerated(STRING)` enum은 같은 패턴이 캐스트 없이도 통과함(과제 28)
+- Spring Batch 6.0부터 `org.springframework.batch.core.repository.explore.JobExplorer`는 `@Deprecated(forRemoval = true)`(6.2+ 제거 예정) — 읽기 기능은 전부 `org.springframework.batch.core.repository.JobRepository`가 흡수(`JobRepository extends JobExplorer`). 배치 Job 이력을 다루는 신규 코드는 `JobExplorer`가 아니라 `JobRepository`를 참조할 것(1단계 조사 문서, 배치3 예정)
 
 ---
 
