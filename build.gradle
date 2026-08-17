@@ -103,10 +103,12 @@ tasks.named('test') {
 	useJUnitPlatform()
 	finalizedBy tasks.jacocoTestReport
 	environment "SPRING_JPA_HIBERNATE_DDL_AUTO", "update"
+	environment "SPRING_SQL_INIT_MODE", "always"
 }
 
 tasks.named('bootRun') {
 	environment "SPRING_JPA_HIBERNATE_DDL_AUTO", "update"
+	environment "SPRING_SQL_INIT_MODE", "always"
 }
 
 jacocoTestReport {

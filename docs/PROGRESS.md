@@ -777,9 +777,40 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 - Port 구현체 테스트(전체 조회/기간 범위/`byDate`), 컨트롤러는 실제 로그인 세션 통합 테스트 + 인증 없이 401, 페이지네이션 경계.
 - 전체 테스트 174개 통과.
 
+### 과제 29: 관리자 조회 API 배치3(배치 Job 이력/Outbox 이벤트) — 6종 완료, JobRepository 실제 영속화로 전환 (완료)
+
+브랜치: `feat/admin-query-apis-batch3` → `develop`
+
+**배경**
+
+- 1단계 조사에서 확정한 관리자 조회 API 6종 중 마지막 2개(배치 Job 실행 이력, Outbox 감사로그 이벤트 목록)를 구현. 이번 배치를 마지막으로 6종 전부 완료.
+
+**중대 발견 — JobRepository가 실제로는 Postgres에 영속화되지 않고 있었음**: 배치 Job 이력 조회 기능을 테스트하던 중, 이 프로젝트의 `JobRepository`가 Spring Boot 4.0의 `spring-boot-batch` 모듈이 기본 제공하는 `ResourcelessJobRepository`(필드 하나에 "가장 최근 실행된 Job 인스턴스 1개"만 기억하는 인메모리 스텁)였다는 걸 확인했다. `application.yaml`의 `spring.batch.jdbc.initialize-schema: always`는 Boot 4에서 이 기능을 제공하던 스키마 초기화 빈 자체가 `spring-boot-batch` 모듈에서 빠지면서 아무 효과가 없었고, Postgres에 `BATCH_*` 테이블이 아예 없었다(`BatchAutoConfiguration` 클래스 자체에 "Auto-configuration for Spring Batch **using an in-memory store**"라고 명시돼 있음). `DefaultBatchConfiguration.jobRepository()`가 `new ResourcelessJobRepository()`를 하드코딩해서 반환하기 때문에, DataSource가 있어도 자동으로 JDBC 기반으로 승격되지 않음. EOD/Reconciliation Job은 "당일 1회만 실행"을 단일 테스트 메서드 안에서만 검증해왔기 때문에 이 제약이 지금까지 드러나지 않았을 뿐, **`JobInstanceAlreadyCompleteException` 기반 재실행 방지도 지금까지는 앱을 재시작하면 무력화되는 상태**였다(부수적으로 함께 발견된 기존 잠재 버그).
+
+**해결**: 사용자 확인 후 JobRepository를 실제로 Postgres에 영속화되도록 전환(1개 옵션 제시 후 채택 — 대안은 "이번 배치에서 배치 Job 이력 기능 보류"였음).
+- `src/main/resources/db/batch-schema-postgresql.sql` — Spring Batch 공식 `schema-postgresql.sql`(spring-batch-core jar 내장)을 그대로 가져오되, 모든 `CREATE TABLE`/`CREATE SEQUENCE`에 `IF NOT EXISTS`를 추가해 매 기동마다 재실행해도 안전하게(idempotent) 만듦. 이 프로젝트는 Flyway/Liquibase를 쓰지 않아 JPA 엔티티는 `ddl-auto`로 관리하지만, Spring Batch 스키마는 `@Entity`가 아니라 순수 JDBC 테이블이라 그 메커니즘 밖에 있음 — 대신 `spring.sql.init.schema-locations`로 이 파일을 지정하고 `spring.sql.init.mode: always`로 매 기동 시 실행되게 함(효과 없던 `spring.batch.jdbc.initialize-schema` 설정은 제거).
+- `global.config.BatchRepositoryConfig`(`DefaultBatchConfiguration` 상속) — `jobRepository()` 빈을 오버라이드해 `JdbcJobRepositoryFactoryBean`으로 앱의 실제 `DataSource`/`PlatformTransactionManager`를 사용하도록 교체. 이 클래스가 `DefaultBatchConfiguration` 타입 빈으로 등록되는 순간 Boot의 `BatchAutoConfiguration`(`@ConditionalOnMissingBean(value = DefaultBatchConfiguration.class, ...)`)이 자동으로 물러남.
+- 부수 효과: EOD/Reconciliation Job의 재실행 방지 보호도 이제 앱 재시작 후에도 실제로 유지됨(위 잠재 버그 해결).
+
+**구현 내용**
+
+- `BatchJobExecutionSummary`(`application.port.out`, `domain.model` 아님) — 은행 업무 도메인이 아니라 Spring Batch 인프라 메타데이터라 `domain.model`에 두지 않고, `GetAccountUseCase.AccountDetail`처럼 Port 전용 결과 레코드를 Port 근처에 두는 기존 전례를 따름. `status` 필드는 `BatchStatus`(프레임워크 타입)를 그대로 안 쓰고 `String`으로 변환해 어댑터 밖으로 프레임워크 타입이 새지 않게 함.
+- `LoadBatchJobExecutionHistoryPort`/`adapter.out.batch.BatchJobExecutionHistoryAdapter`(신규 패키지) — `JobRepository`(`JobExplorer` 아님 — Batch 6.0부터 `@Deprecated(forRemoval=true)`)를 감싸 `JobExecution`/`JobInstance` 같은 프레임워크 타입이 어댑터 밖으로 새지 않게 번역. `getJobInstances(jobName, start, count)`로 페이지를 가져오고 `getJobExecutions(instance)`로 실행 이력을 펼침, `getJobInstanceCount(jobName)`으로 totalElements 계산(`NoSuchJobException`은 "한 번도 안 돈 Job"으로 보고 0 처리).
+- 신규 `BatchJobExecutionController` — `GET /api/v1/batch-jobs/{jobName}/executions`.
+- `LoadOutboxEventsPort`(신규, `loadPage`) — 기존 `LoadAllOutboxEventsPort.loadAllOrderedById()`(무제한 List, `/verify` 전용 해시체인 전량 검증에는 정당)는 손대지 않음. `OutboxEventJpaRepository`에 `Pageable` 오버로드 추가.
+- 기존 `AuditController`에 `GET /api/v1/audit/events` 추가(새 컨트롤러 만들지 않음 — `/verify`와 같은 리소스군). `OutboxEventResponse`는 `aggregateType`/`aggregateId`/`eventType`/`createdAt`만 노출 — `entryHash`/`previousHash`는 해시체인 무결성 검증(`/verify`)의 내부 계산값이라 목록 조회에는 노출하지 않음(최소 필드 원칙).
+
+**테스트**
+
+- `BatchJobExecutionHistoryAdapterTest` — `eodSettlementJob`/`reconciliationJob`을 실제로 각각 launch해 실행 이력을 만든 뒤, jobName으로 조회하면 서로 섞이지 않고 정확히 해당 Job 것만 반환되는지 검증(이 기능의 핵심 정합성). 배치 메타데이터 테이블은 `JdbcTemplate`으로 직접 `TRUNCATE`해 격리(`JobRepositoryTestUtils.removeJobExecutions()`는 실행(Execution) 없이 인스턴스만 있는 행을 정리하지 못하는 gap이 있어 이 프로젝트의 `deleteAllInBatch()` 컨벤션과 동일하게 직접 초기화하는 쪽을 택함).
+- `BatchJobExecutionControllerTest`/`AuditControllerTest` — 실제 로그인 세션 통합 테스트 + 인증 없이 401, 페이지네이션 경계.
+- `OutboxPersistenceAdapterTest`에 `loadPage()` 단위 테스트 추가.
+- 전체 테스트(`./gradlew test`) 183개 통과, `./gradlew spotlessCheck` 통과.
+
+**문서**: `ARCHITECTURE.md`에 JobRepository 실제 영속화 결정(18번)과 관리자 조회 API 6종이 배치 처리량/락 경합과 무관하다는 결정(19번)을 기록. `README.md`에 6종(엔드포인트 기준 7개) 전체 목록 표 추가.
+
 ## 🚧 다음 작업
 
-- 관리자 조회 API 배치3(배치 Job 실행 이력, Outbox 감사로그 이벤트 목록) 남음 — 1단계 조사에서 확정한 6종 중 마지막 2개. 배치 Job 이력은 `JobExplorer`가 아니라 `JobRepository`로 구현할 것(Spring Batch 6.0부터 `JobExplorer`는 `@Deprecated(forRemoval = true)`, 읽기 기능은 `JobRepository`가 흡수함 — 아래 Reconciliation 게이트 항목도 동일 주의 필요).
 - (보류) 승인은 됐으나 집행(실제 이체) 실패한 건의 재시도 정책 — 과제 23에서 `TransferApprovalRequest.executionStatus`(NOT_APPLICABLE/EXECUTED/FAILED)로 "승인 행위"와 "집행 결과"를 분리했지만, `executionStatus=FAILED`로 남은 건을 재시도시킬 API/운영 절차는 이번 스코프에서 의도적으로 제외(YAGNI). 재시도 API 필요 시: 같은 요청을 다시 집행할지, 아니면 신규 승인 요청을 처음부터 다시 만들게 할지부터 결정 필요.
 - CI 파이프라인 부재 — GitHub Actions로 PR마다 `./gradlew test` 자동 실행하는 게 없어, 지금까지는 사람이 매번 로그를 직접 요구해서 확인. "재현 가능한 품질 관리"를 위해 다음 세션 우선순위로 권장.
 - 엔드포인트별 Swagger `@Operation`/`@Schema` 문서화 — 과제 24에서 최소 설정만 도입, 상세 문서화는 제외(YAGNI).
@@ -790,7 +821,7 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 - (보류) Debezium EventRouter SMT의 `table.fields.additional.placement`(trace_id/span_id 헤더 라우팅)를 커버하는 자동화된 통합 테스트 — 위 두 항목과 같은 이유(실제 Kafka 브로커 필요)로 보류, 현재는 로컬 수동 검증으로만 확인됨(과제 17 참고)
 - (보류) Testcontainers 기반 통합 테스트 재검증 — 프로젝트 전체가 docker-compose 기반 통합 테스트 컨벤션을 일관되게 쓰고 있어 현재는 도입 보류로 결정(Testcontainers는 이 컨벤션과 공존 시 일관성이 깨짐, YAGNI)
 - (권장) 실제 배포 대상 Postgres에 `accounts.balance` 컬럼 등 orphan 컬럼이 남아있다면 `ALTER TABLE ... DROP COLUMN`으로 별도 정리 필요(과제 16 참고, 이 프로젝트는 Flyway/Liquibase 미사용)
-- (보류) Reconciliation Job 레벨 사전 게이트(당일 `eodSettlementJob` 완료 여부를 확인 후 스킵, 구현 시 `JobExplorer`가 아니라 `JobRepository` 사용 — 위 배치3 항목 참고) — 계좌별 `NO_SNAPSHOT` 분류만으로도 "EOD가 안 돌았다"는 사실이 이미 드러나므로 이번 스코프에서는 제외(YAGNI). 알림이 너무 많이 쌓여 노이즈가 문제되면 추가(과제 22 참고)
+- (보류) Reconciliation Job 레벨 사전 게이트(당일 `eodSettlementJob` 완료 여부를 확인 후 스킵, 구현 시 `JobExplorer`가 아니라 `JobRepository` 사용 — 과제 29에서 `JobRepository`가 실제로 Postgres에 영속화되도록 이미 전환됨) — 계좌별 `NO_SNAPSHOT` 분류만으로도 "EOD가 안 돌았다"는 사실이 이미 드러나므로 이번 스코프에서는 제외(YAGNI). 알림이 너무 많이 쌓여 노이즈가 문제되면 추가(과제 22 참고)
 
 ## 🤖 AI 에이전트(Claude Code) 활용 방침
 
@@ -843,7 +874,8 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 - 두 값(예: DEBIT/CREDIT 쌍)의 불변식을 지키려면 "따로 만들고 나중에 검증"(validate-after)보다 "애초에 어긋난 값을 만들 수 없는 시그니처"(invariant-by-construction, 예: `LedgerEntry.transferPair`가 두 다리에 동일 `Money` 인스턴스를 강제)가 더 신뢰도 높음
 - "존재하지 않아서 우연히 막히는" 방어(예: sentinel 계좌번호가 실제 row가 없어서 조회 실패로 차단됨)는 나중에 그 전제가 깨지면 조용히 무력화되므로, 알아챈 즉시 명시적 가드 클로즈 + 전용 도메인 예외로 전환할 것(과제 16, `ReservedAccountException`)
 - JPQL에서 `:param is null or column = :param` 패턴으로 nullable 필터를 구현할 때, `@Query`의 `countQuery`는 항상 명시적으로 같이 작성할 것(과제 27) — Spring Data의 자동 count 쿼리 유도가 조건절이 복잡해질수록 실패하거나 성능이 나빠질 수 있음. 또한 파라미터 타입에 따라 이 패턴 자체가 Postgres에서 깨질 수 있음: `LocalDate`처럼 `IS NULL` 단독 위치에서 타입을 추론할 문맥이 없는 파라미터는 `could not determine data type of parameter` 오류가 나므로 `cast(:param as date)`를 명시해야 함 — 반면 `@Enumerated(STRING)` enum은 같은 패턴이 캐스트 없이도 통과함(과제 28)
-- Spring Batch 6.0부터 `org.springframework.batch.core.repository.explore.JobExplorer`는 `@Deprecated(forRemoval = true)`(6.2+ 제거 예정) — 읽기 기능은 전부 `org.springframework.batch.core.repository.JobRepository`가 흡수(`JobRepository extends JobExplorer`). 배치 Job 이력을 다루는 신규 코드는 `JobExplorer`가 아니라 `JobRepository`를 참조할 것(1단계 조사 문서, 배치3 예정)
+- Spring Batch 6.0부터 `org.springframework.batch.core.repository.explore.JobExplorer`는 `@Deprecated(forRemoval = true)`(6.2+ 제거 예정) — 읽기 기능은 전부 `org.springframework.batch.core.repository.JobRepository`가 흡수(`JobRepository extends JobExplorer`). 배치 Job 이력을 다루는 신규 코드는 `JobExplorer`가 아니라 `JobRepository`를 참조할 것(과제 29에서 `BatchJobExecutionHistoryAdapter`에 적용)
+- Spring Boot 4.0의 `spring-boot-batch` 모듈은 기본적으로 `JobRepository`를 **인메모리 전용**(`ResourcelessJobRepository`)으로 구성한다(`BatchAutoConfiguration` 클래스 javadoc에 명시). `spring.batch.jdbc.initialize-schema` 프로퍼티는 이 버전에서 대응하는 스키마 초기화 빈이 없어 아무 효과가 없음 — 실제로 Postgres에 영속화하려면 `DefaultBatchConfiguration`을 상속한 자체 `@Configuration`에서 `jobRepository()` 빈을 `JdbcJobRepositoryFactoryBean`으로 오버라이드하고, Spring Batch 공식 스키마(`schema-postgresql.sql`, spring-batch-core jar 내장)를 직접 적용해야 함(과제 29, `BatchRepositoryConfig`). `ResourcelessJobRepository`는 필드 하나에 최근 실행 1건만 기억해 `JobInstanceAlreadyCompleteException` 기반 재실행 방지도 앱 재시작 시 무력화됨 — EOD/Reconciliation Job처럼 이미 이 저장소를 쓰던 기존 Job에도 해당되는 잠재 버그였음(과제 29에서 함께 해결)
 
 ---
 

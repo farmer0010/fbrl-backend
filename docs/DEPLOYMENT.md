@@ -25,6 +25,7 @@ Spring Boot의 환경변수 relaxed binding은 `.`과 `-` 둘 다 단어 경계�
 | `SPRING_DATASOURCE_USERNAME` | `spring.datasource.username` | `fbrl_user` | **필수** | loud | 상동 |
 | `SPRING_DATASOURCE_PASSWORD` | `spring.datasource.password` | `fbrlpassword` | **필수** | loud | 로컬 기본값은 docker-compose 시드값과 동일한 더미 — 프로덕션에서 반드시 실제 값으로 교체. 안 바꾸면 인증 실패로 기동 자체가 안 됨(loud) |
 | `SPRING_JPA_HIBERNATE_DDL_AUTO` | `spring.jpa.hibernate.ddl-auto` | `validate`(2026-08-16 이번 변경으로 기본값 자체가 안전해짐) | 프로덕션 필수 아님 | (이번 수정 전) silent → (이번 수정 후) 안전 | 예전엔 기본값이 `update`라 안 건드려도 매 기동마다 조용히 스키마를 변경하는 것이 Critical 리스크였음. 기본값을 `validate`로 바꿔 프로덕션에서 이 값을 아예 신경 쓰지 않아도 스키마를 건드리지 않도록 함. **`update`로 절대 덮어쓰지 말 것**(마이그레이션 도구 도입 전까지) |
+| `SPRING_SQL_INIT_MODE` | `spring.sql.init.mode` | `never`(로컬 `test`/`bootRun` 태스크만 `always`로 오버라이드) | 프로덕션 필수 아님(`never` 유지) | **loud, 배포 담당자가 수동 DDL을 깜빡하면 기동 시점이 아니라 첫 배치 실행/첫 관리자 API 호출 시점에 드러남** | Spring Batch 스키마(`BATCH_*` 6개 테이블, `db/batch-schema-postgresql.sql`)를 앱이 기동 시점에 자동 적용하지 않도록 `never`로 고정(과제 29). 원래 `always`(매 기동 시 `CREATE TABLE IF NOT EXISTS` 재적용)였으나, **완전히 빈 DB에 여러 replica가 동시에 최초 기동하면 Postgres MVCC 특성상 경쟁 조건이 실재함을 `pgbench` 8개 동시 커넥션으로 재현(30/30 라운드 전부 `ERROR: duplicate key value violates unique constraint "pg_type_typname_nsp_index"`)** — `ddl-auto: update → validate` 전환(위 항목)과 같은 이유로 "앱이 기동 시점에 스키마를 건드리지 않는다"는 원칙을 여기도 적용해 `never`로 전환. **배포 전 아래 "스키마 변경이 포함된 배포" 절의 수동 DDL을 먼저 적용할 것** — 이 테이블은 JPA 엔티티가 아니라 `ddl-auto`/`validate`의 자동 검증 대상이 아니므로, 안 하면 기동 자체는 정상적으로 되고 배치 Job이 처음 실행되거나 관리자가 배치 이력 조회 API를 처음 호출하는 시점에야 `relation "batch_job_instance" does not exist`류 에러로 뒤늦게 드러남(JPA `validate`보다 늦고 조용한 실패 시점이라는 게 이 전환의 트레이드오프) |
 | `SPRING_DATA_REDIS_HOST` | `spring.data.redis.host` | `localhost` | **필수** | loud로 추정(미검증) | Redisson이 기동 시 실제 연결을 시도하는 것으로 일반적으로 알려져 있음. 이 코드베이스에서 직접 재현 검증한 것은 아님 |
 | `SPRING_DATA_REDIS_PORT` | `spring.data.redis.port` | `6379` | **필수** | loud로 추정(미검증) | 상동 |
 | `SPRING_KAFKA_BOOTSTRAP_SERVERS` | `spring.kafka.bootstrap-servers` | `localhost:9092` | **필수** | **미확정(loud/silent 둘 다 가능성 있음)** | Kafka Producer는 일반적으로 lazy 연결이라, 이 값이 틀리거나 없어도 앱이 정상 기동하고 이벤트 발행만 조용히 실패할 가능성이 있음(미검증). **배포 후 반드시 실제 이체 1건을 발행해 `transfer-events` 토픽 수신을 직접 확인할 것.** |
@@ -58,6 +59,15 @@ Spring Boot의 환경변수 relaxed binding은 `.`과 `-` 둘 다 단어 경계�
     ALTER TABLE transfer_approval_requests ADD COLUMN execution_failure_reason VARCHAR(255);
     ```
   - 배포 전 이 DDL을 프로덕션 DB에 먼저 적용하지 않으면, 새 애플리케이션 버전은 `ddl-auto: validate`가 스키마 불일치를 즉시 감지해 기동 자체가 실패합니다(loud) — 데이터 정합성보다는 기동 실패로 먼저 드러나는 종류의 변경.
+
+- **`feat/admin-query-apis-batch3`(배치 Job 이력 조회)** — `JobRepository`를 실제 Postgres에 영속화하도록 전환하면서 `BATCH_*` 테이블 6개가 신규로 필요해졌습니다(과제 29). `spring.sql.init.mode`가 `never`라 앱이 기동 시점에 이 테이블을 자동 생성하지 않으므로, **배포 전 프로덕션 DB에 아래 DDL을 먼저 1회 적용**할 것:
+  ```sql
+  -- src/main/resources/db/batch-schema-postgresql.sql 전체 내용을 그대로 실행
+  -- (또는 컨테이너 안에서 직접 실행)
+  -- docker exec -i <postgres-container> psql -U <user> -d <db> < src/main/resources/db/batch-schema-postgresql.sql
+  ```
+  이 파일은 전부 `CREATE TABLE IF NOT EXISTS`/`CREATE SEQUENCE IF NOT EXISTS`라 이미 적용된 환경에서 다시 실행해도 안전합니다(idempotent) — 여러 환경에 걸쳐 반복 적용해도 되고, 실수로 두 번 적용해도 무해합니다.
+  - **이 DDL을 깜빡했을 때의 실패 시점 — 다른 스키마 변경과 다름**: 위 `execution_status` 컬럼 추가는 `ddl-auto: validate`가 즉시 잡아내 기동 자체가 loud하게 실패하지만, 이 테이블들은 JPA `@Entity`가 아니라서 `ddl-auto`/`validate` 검증 대상이 아닙니다. 앱은 정상 기동하고, **배치 Job이 처음 실행되거나 관리자가 `GET /api/v1/batch-jobs/{jobName}/executions`를 처음 호출하는 시점**에야 `relation "batch_job_instance" does not exist`(또는 유사한 SQL 에러)로 뒤늦게 드러납니다 — 배포 직후 반드시 이 엔드포인트를 한 번 호출해 확인할 것.
 
 ## 인증 실패 시 HTTP 상태 코드 (프론트엔드 참고)
 

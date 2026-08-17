@@ -1,17 +1,22 @@
 package com.fbrl.adapter.out.persistence;
 
 import com.fbrl.application.port.out.LoadAllOutboxEventsPort;
+import com.fbrl.application.port.out.LoadOutboxEventsPort;
+import com.fbrl.application.port.out.PagedResult;
 import com.fbrl.application.port.out.SaveOutboxEventPort;
 import com.fbrl.domain.model.OutboxEvent;
 import io.micrometer.tracing.Span;
 import io.micrometer.tracing.Tracer;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Component;
 
 @Component
 @RequiredArgsConstructor
-public class OutboxPersistenceAdapter implements SaveOutboxEventPort, LoadAllOutboxEventsPort {
+public class OutboxPersistenceAdapter
+    implements SaveOutboxEventPort, LoadAllOutboxEventsPort, LoadOutboxEventsPort {
   private static final String SPAN_NAME = "outbox.save";
 
   private final OutboxEventJpaRepository outboxEventJpaRepository;
@@ -56,6 +61,15 @@ public class OutboxPersistenceAdapter implements SaveOutboxEventPort, LoadAllOut
     return outboxEventJpaRepository.findAllByOrderByIdAsc().stream()
         .map(OutboxEventJpaEntity::toDomain)
         .toList();
+  }
+
+  @Override
+  public PagedResult<OutboxEvent> loadPage(int page, int size) {
+    Page<OutboxEventJpaEntity> result =
+        outboxEventJpaRepository.findAllByOrderByIdAsc(PageRequest.of(page, size));
+    List<OutboxEvent> items =
+        result.getContent().stream().map(OutboxEventJpaEntity::toDomain).toList();
+    return new PagedResult<>(items, result.getTotalElements());
   }
 
   public void deleteAllInBatch() {

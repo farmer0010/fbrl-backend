@@ -23,7 +23,7 @@ com.fbrl
 │   └── service        # UseCase 구현체 (CreateAccountService, TransferSagaOrchestrator, VerifyAuditChainService, ...)
 ├── adapter
 │   ├── in
-│   │   ├── web         # AccountController, TransferMoneyController, TransferApprovalController, ReconciliationDiscrepancyController, EodSnapshotController, AuthController, AuditController, GlobalExceptionHandler
+│   │   ├── web         # AccountController, TransferMoneyController, TransferApprovalController, ReconciliationDiscrepancyController, EodSnapshotController, BatchJobExecutionController, AuthController, AuditController, GlobalExceptionHandler
 │   │   ├── kafka        # TransferEventConsumer, KafkaRetryTopicConfig
 │   │   ├── batch         # EodSettlementJobConfig, AccountItemReader/Processor/Writer, ReconciliationJobConfig/ItemWriter
 │   │   └── scheduler      # EodSettlementScheduler, ReconciliationScheduler
@@ -33,6 +33,7 @@ com.fbrl
 │       ├── participant     # WithdrawalParticipantAdapter, DepositParticipantAdapter (Saga 참여자)
 │       ├── kubernetes       # KubernetesLeaderElectionAdapter
 │       ├── fraud             # RuleBasedFraudCheckAdapter
+│       ├── batch               # BatchJobExecutionHistoryAdapter
 │       └── serialization     # JacksonPayloadSerializerAdapter
 └── global
     ├── common.annotation   # @DistributedLock, @CheckIdempotency
@@ -268,7 +269,29 @@ com.fbrl
 
 **구현 위치**: JPA 리포지토리(`*JpaRepository`)는 `Pageable pageable` 파라미터를 받아 `Page<T>`를 반환(Spring Data가 공짜로 제공) → `*PersistenceAdapter`가 `Page<T>.getContent()`/`getTotalElements()`를 읽어 `PagedResult<T>`로 변환 → 컨트롤러가 `PageResponse.of(content, totalElements, page, size)`로 최종 변환. `*Mapper`가 도메인 ↔ JPA 엔티티를 변환하는 기존 컨벤션과 동형으로, 계층 경계마다 번역 책임이 있는 구조.
 
-**적용 현황**: 승인 요청 이력(`LoadApprovalRequestPort.search`), Reconciliation 불일치 목록(`LoadReconciliationDiscrepancyPort.search`), 계좌별 원장(`LoadLedgerEntriesPort.loadByAccountNumberAndPeriod`), EOD 스냅샷(`LoadEodSnapshotHistoryPort.byAccountNumber`/`byDate`) — 전부 동일 패턴.
+**적용 현황**: 승인 요청 이력(`LoadApprovalRequestPort.search`), Reconciliation 불일치 목록(`LoadReconciliationDiscrepancyPort.search`), 계좌별 원장(`LoadLedgerEntriesPort.loadByAccountNumberAndPeriod`), EOD 스냅샷(`LoadEodSnapshotHistoryPort.byAccountNumber`/`byDate`), Outbox 이벤트 목록(`LoadOutboxEventsPort.loadPage`) — 전부 JPA `Pageable`/`Page<T>` 기반 동일 패턴. 배치 Job 실행 이력(`LoadBatchJobExecutionHistoryPort.recentExecutions`)만 예외 — JPA가 아니라 `JobRepository.getJobInstances(jobName, start, count)`의 자체 offset/limit 파라미터로 페이징하지만, `PagedResult<T>`를 반환한다는 대외 계약은 동일하게 지킴(자세한 내용은 결정 18번).
+
+### 18. 배치 Job 실행 이력 조회를 위해 JobRepository를 실제 Postgres 영속화로 전환
+
+**문제 상황**: 배치 Job 실행 이력 API(결정 17번의 예외 케이스)를 구현하던 중, 이 프로젝트의 `JobRepository`가 Spring Boot 4.0의 `spring-boot-batch` 모듈이 기본 제공하는 `ResourcelessJobRepository`(필드 하나에 "가장 최근 실행된 Job 인스턴스 1개"만 기억하는 인메모리 스텁)라는 걸 발견했다. `BatchAutoConfiguration` 클래스 자체에 "Auto-configuration for Spring Batch **using an in-memory store**"라고 명시돼 있고, `application.yaml`의 `spring.batch.jdbc.initialize-schema: always`는 이 버전에서 대응하는 스키마 초기화 빈이 빠지면서 아무 효과가 없었다 — Postgres에 `BATCH_*` 테이블 자체가 없었음. `DefaultBatchConfiguration.jobRepository()`가 `new ResourcelessJobRepository()`를 하드코딩 반환하기 때문에, DataSource가 있어도 자동으로 JDBC 기반으로 승격되지 않는다. EOD/Reconciliation Job은 지금까지 "단일 테스트 메서드 안에서 1회 실행 후 검증"만 해왔기 때문에 이 제약이 드러나지 않았을 뿐, `JobInstanceAlreadyCompleteException` 기반 재실행 방지도 앱을 재시작하면 무력화되는 기존 잠재 버그였다(이번에 부수적으로 발견).
+
+**대안 비교**: (a) JobRepository를 실제로 영속화되게 고친다 — 기존 EOD/Reconciliation Job에도 영향을 주는 인프라 변경이지만, 배치 Job 이력 API가 애초에 의미를 가지려면 필수. (b) 이번 배치에서 배치 Job 이력 API는 보류하고 인프라 정비 후 재개. (c) `ResourcelessJobRepository`의 제약(최근 실행 1건만)을 그대로 두고 API/테스트를 그 제약에 맞게 작성 — 실제로는 "가장 최근 실행된 Job이 무엇이든 그것"을 돌려주는 사실상 오작동이라 기각. 사용자 확인 후 **(a) 채택**.
+
+**구현**: `src/main/resources/db/batch-schema-postgresql.sql` — Spring Batch 공식 스키마(spring-batch-core jar 내장 `schema-postgresql.sql`)를 그대로 옮기되 모든 `CREATE TABLE`/`CREATE SEQUENCE`에 `IF NOT EXISTS`를 추가해 재실행해도 안전하게(idempotent) 만듦. Spring Batch 테이블은 `@Entity`가 아니라 순수 JDBC 테이블이라 이 프로젝트의 `ddl-auto` 관리 밖에 있으므로, `spring.sql.init.schema-locations`로 이 파일을 지정(효과 없던 `spring.batch.jdbc.initialize-schema`는 제거). `global.config.BatchRepositoryConfig`(`DefaultBatchConfiguration` 상속)가 `jobRepository()` 빈을 `JdbcJobRepositoryFactoryBean`으로 오버라이드해 앱의 실제 `DataSource`/`PlatformTransactionManager`를 사용 — 이 클래스가 `DefaultBatchConfiguration` 타입 빈으로 등록되는 순간 Boot의 `BatchAutoConfiguration`(`@ConditionalOnMissingBean(value = DefaultBatchConfiguration.class, ...)`)이 자동으로 물러남.
+
+**후속 결정 — `spring.sql.init.mode: always`에서 `never`로 전환(push 전 재검토)**: 최초 구현은 `mode: always`로 매 기동마다 스키마를 재적용했다. push 전 "Azure 멀티 replica 동시 기동에서 안전한가"를 재검토하면서, `pgbench`로 8개 동시 커넥션이 같은 `CREATE TABLE IF NOT EXISTS`를 실행하도록 재현한 결과 **30/30 라운드 전부** `ERROR: duplicate key value violates unique constraint "pg_type_typname_nsp_index"`가 발생함을 확인했다 — Postgres MVCC 하에서 "존재 확인 → 생성"이 원자적이지 않아, 완전히 빈 DB에 여러 replica가 동시에 최초 기동하면 실제로 깨진다(한 replica가 커밋한 뒤에는 경쟁 조건이 사라져 재시도 시 100% 성공하는 self-healing 실패이긴 함). 애초에 "Flyway/Liquibase 없이, 앱이 기동 시점에 스키마를 조용히/위험하게 건드리지 않는다"는 원칙을 `ddl-auto: update → validate` 전환(결정 6번 이전 트러블슈팅 기록 참고)으로 이미 값비싸게 학습해뒀는데, 처음 구현에서는 그 원칙에 예외를 뒀던 것 — 재검토 후 예외를 없애고 원칙을 그대로 적용하는 쪽으로 뒤집었다.
+
+**대안 재비교(push 전)**: (a) `mode: always` 유지 — 경쟁 조건이 운영 절차(replica 순차 기동)에 의존해야만 안전, 이 프로젝트의 기존 원칙과도 반대 방향. (b) `mode: never` + 배포 시 수동 1회 적용 — 경쟁 조건 원천 제거, 기존 `ddl-auto` 원칙과 동일선상. 다만 JPA `ddl-auto: validate`와 달리 이 테이블들은 기동 시점 자동 검증 대상이 아니라서, 수동 DDL을 깜빡하면 기동 실패가 아니라 **첫 배치 실행/첫 관리자 API 호출 시점**에야 뒤늦게 드러나는 비대칭이 있음(감수하기로 함, `DEPLOYMENT.md`에 명시). (c) `mode: always` 유지 + Postgres advisory lock으로 감싸 경쟁 조건만 제거 — Flyway/Liquibase가 쓰는 정확한 해법이지만 Spring Boot가 기본 제공하지 않아 커스텀 초기화 빈을 새로 짜야 하고, 이 프로젝트가 마이그레이션 도구 없이 사람이 수동으로 맞추는 컨벤션을 의도적으로 유지해온 것과 결이 다른 신규 자동화 패턴이라 과설계로 판단해 기각. **(b) 채택.**
+
+**로컬/테스트 제로터치 유지**: `SPRING_JPA_HIBERNATE_DDL_AUTO`를 `test`/`bootRun` Gradle 태스크에서만 `update`로 오버라이드해온 것과 동일한 방식으로, `SPRING_SQL_INIT_MODE`도 같은 두 태스크에서 `always`로 오버라이드 — `build.gradle`에서 두 환경변수를 나란히 선언해 "같은 이유로 같이 오버라이드된다"는 게 코드만 봐도 드러나게 함.
+
+### 19. 관리자 조회 API 6종은 읽기 전용 — 배치 처리량/락 경합과 무관, 캐싱 없음(YAGNI)
+
+**결정 사항**: 승인 요청 이력, Reconciliation 불일치 목록, 계좌별 원장, EOD 스냅샷(계좌별/날짜별), 배치 Job 실행 이력, Outbox 이벤트 목록 — 6종 전부 순수 조회(`SELECT`)만 수행하며, 어떤 쓰기 경로(이체, 승인, EOD/Reconciliation 배치)와도 락을 공유하지 않는다. 캐싱 등 추가 최적화는 하지 않았다(YAGNI).
+
+**근거**: `TransferMoneyService.transfer()`의 `@DistributedLock(key = "#command.senderAccountNumber")`, EOD/Reconciliation Job의 청크 단위 쓰기 등 이 프로젝트의 쓰기 경로는 전부 특정 계좌/배치 실행 단위로 락을 잡거나 트랜잭션을 짧게 유지하는 설계인 반면, 이번 6종 API는 전부 `LoadXxxPort` 계열의 단순 페이지 조회이고 그 어떤 서비스 메서드도 락을 잡은 상태에서 이 Port들을 호출하지 않는다. 따라서 조회 트래픽이 늘어나도 이체 처리량이나 배치 실행 시간에 영향을 주지 않는다.
+
+**캐싱을 안 한 이유**: 관리자 화면 조회는 트래픽 규모가 작고(내부 관리자 전용, 다수 동시 사용자 없음), 최신성이 중요한 운영 데이터(승인 대기 현황, 배치 실행 상태 등)라 캐시 무효화 전략을 새로 설계하는 비용이 이득보다 큼. 필요해지면(예: 관리자 화면 응답 지연이 실제로 문제될 때) 그때 추가한다.
 
 ---
 
