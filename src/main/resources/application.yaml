@@ -43,7 +43,7 @@ spring:
 
   sql:
     init:
-      mode: always
+      mode: never
       schema-locations: classpath:db/batch-schema-postgresql.sql
 
 management:
