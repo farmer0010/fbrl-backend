@@ -275,7 +275,7 @@ class TransferApprovalControllerTest {
   }
 
   @Test
-  @DisplayName("다른 관리자 계정으로 정상 거절 요청 시 REJECTED 상태와 함께 200 OK를 반환한다.")
+  @DisplayName("다른 관리자 계정으로 정상 거절 요청 시 REJECTED 상태와 함께 200 OK를 반환하고, 사유와 승인자가 토큰의 사용자명으로 저장된다.")
   void rejectByDifferentAdmin_succeeds() throws Exception {
     TransferApprovalRequest request =
         TransferApprovalRequest.request(MAKER_USERNAME, SENDER, RECEIVER, Money.wons(20_000_000));
@@ -294,5 +294,37 @@ class TransferApprovalControllerTest {
     TransferApprovalRequest persisted =
         approvalPersistenceAdapter.loadByRequestId(request.getRequestId()).orElseThrow();
     assertThat(persisted.getCheckerId()).isEqualTo(CHECKER_USERNAME);
+    assertThat(persisted.getRejectionReason()).isEqualTo("한도 초과 우려");
+  }
+
+  @Test
+  @DisplayName(
+      "기안자 본인의 로그인 세션으로 자신이 기안한 요청을 거절하면 SelfApprovalNotAllowedException이 터져 400 Bad Request를 반환한다.")
+  void rejectBySameLoginSession_isRejectedAsSelfApproval() throws Exception {
+    RequestTransferApprovalRequest requestBody =
+        new RequestTransferApprovalRequest(SENDER, RECEIVER, BigDecimal.valueOf(20_000_000));
+
+    String responseBody =
+        mockMvc
+            .perform(
+                post("/api/v1/transfer-approvals")
+                    .header(HttpHeaders.AUTHORIZATION, bearer(makerToken))
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(objectMapper.writeValueAsString(requestBody)))
+            .andExpect(status().isOk())
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+    String requestId = objectMapper.readTree(responseBody).get("requestId").asText();
+    RejectTransferRequest rejectBody = new RejectTransferRequest("한도 초과 우려");
+
+    mockMvc
+        .perform(
+            post("/api/v1/transfer-approvals/" + requestId + "/reject")
+                .header(HttpHeaders.AUTHORIZATION, bearer(makerToken))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(rejectBody)))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("SELF_APPROVAL_NOT_ALLOWED"));
   }
 }

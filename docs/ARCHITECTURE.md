@@ -242,6 +242,14 @@ com.fbrl
 
 **재시도 정책은 스코프 밖**: `executionStatus=FAILED`로 남은 건을 재실행시키는 API/운영 절차는 YAGNI로 이번 스코프에서 제외 — `PROGRESS.md` "다음 작업" 참고.
 
+### 15. Command의 makerId/checkerId — 인증된 신원 보장은 웹 어댑터 책임
+
+**결정 사항**: `ApproveTransferCommand`/`RejectTransferCommand`/`RequestTransferApprovalCommand`의 `makerId`/`checkerId`는 인증된 신원이라는 게 웹 어댑터(`TransferApprovalController`)에서만 보장되고, application/domain 계층엔 이를 강제하는 코드가 없다. 향후 컨트롤러를 거치지 않는 새 호출자가 생기면 이 계약을 반드시 인지하고 인증된 신원만 전달해야 한다.
+
+**배경**: `TransferApprovalController`가 `Authentication.getName()`(JWT `sub`, 곧 `AdminUser.username`)에서 makerId/checkerId를 채워 Command를 생성하도록 바꾸면서, Command 레코드 자체의 시그니처(`String makerId`/`String checkerId`)는 그대로 유지했다. `TransferApprovalRequest.assertNotSelfApproval()`의 자기승인 방지도 결국 "두 문자열이 같은가"만 비교하므로, 이 문자열이 실제로 인증된 사용자명이라는 보장은 오직 호출자(현재는 컨트롤러 하나)가 지켜야 하는 계약이지 타입 시스템이나 도메인 불변식으로 강제되지 않는다.
+
+**주의**: `ApproveTransferBypassesWebGateIntegrationTest`처럼 컨트롤러를 거치지 않고 서비스를 직접 호출하는 코드(테스트든 배치든 내부 관리자 CLI든)는 이 계약 밖에 있다 — 임의의 문자열을 makerId/checkerId로 넘겨도 컴파일·런타임 모두 막지 못한다. 새 호출 경로를 추가할 때는 그 경로가 인증된 신원을 전달하는지 직접 확인해야 한다.
+
 ---
 
 각 결정의 배경/트러블슈팅 전체 기록은 [`PROGRESS.md`](./PROGRESS.md)를 참고하세요.
