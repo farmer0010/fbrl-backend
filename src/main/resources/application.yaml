@@ -40,8 +40,11 @@ spring:
   batch:
     job:
       enabled: false
-    jdbc:
-      initialize-schema: always
+
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:db/batch-schema-postgresql.sql
 
 management:
   tracing:

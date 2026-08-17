@@ -101,6 +101,20 @@ graph TB
 - Kafka Consumer Non-blocking Retry Topic + DLT (결정론적 실패는 즉시 DLT로, 일시적 실패는 지수 백오프 재시도)
 - Chaos Mesh 기반 결함 주입은 **Infra 담당(김준희) 영역**이며 이 리포지토리의 범위 밖입니다. 백엔드는 "어떤 장애 시나리오로 무엇을 검증할지" 정의와 장애 주입 후 애플리케이션 반응 검증을 담당합니다.
 
+## 관리자 조회 API
+
+관리자 프론트엔드용 읽기 전용 조회 API 6종(엔드포인트 기준 7개)입니다. 전부 로그인(`POST /api/v1/auth/login`) 후 발급받은 JWT로 인증이 필요하며, 역할 구분 없이 단일 `ADMIN` 역할만 존재합니다. 페이지네이션은 공통으로 `page`(0-base)/`size` 쿼리 파라미터 + `{content, totalElements, page, size, totalPages}` 응답 형태를 씁니다.
+
+| # | 엔드포인트 | 설명 | 필터 파라미터 |
+|---|---|---|---|
+| 1 | `GET /api/v1/transfer-approvals` | 승인 요청 이력(전체 상태) | `status`(선택), `from`/`to`(Instant, 필수) |
+| 2 | `GET /api/v1/reconciliation-discrepancies` | Reconciliation 불일치 목록 | `status`(선택), `from`/`to`(LocalDate, 필수) |
+| 3 | `GET /api/v1/accounts/{accountNumber}/ledger-entries` | 계좌별 원장 조회 | `from`/`to`(Instant, 필수) |
+| 4 | `GET /api/v1/accounts/{accountNumber}/eod-snapshots` | 계좌별 EOD 스냅샷 히스토리 | `from`/`to`(LocalDate, 선택) |
+| 5 | `GET /api/v1/eod-snapshots` | 날짜별 전체 계좌 EOD 스냅샷 | `date`(LocalDate, 필수) |
+| 6 | `GET /api/v1/batch-jobs/{jobName}/executions` | 배치 Job(`eodSettlementJob`/`reconciliationJob`) 실행 이력 | `jobName`(path) |
+| 6 | `GET /api/v1/audit/events` | Outbox 감사로그 이벤트 목록(단건 검증 `/verify`와는 별개) | 없음 |
+
 ## 로컬 실행 방법
 
 의존 인프라(PostgreSQL, Redis, Kafka, Kafka Connect, Jaeger)는 `docker-compose.yml`로 기동합니다. Debezium 커넥터는 Kafka Connect REST API로 별도 등록해야 합니다.
@@ -114,7 +128,7 @@ curl -X POST -H "Content-Type: application/json" \
 ```
 
 - 계좌 개설/조회, 이체 API는 `localhost:8080`에서 확인할 수 있습니다.
-- API 명세는 Swagger UI(`http://localhost:8080/swagger-ui/index.html`)에서 확인할 수 있습니다. Spring Security가 아직 없어 별도 인증 없이 열립니다.
+- API 명세는 Swagger UI(`http://localhost:8080/swagger-ui/index.html`)에서 확인할 수 있습니다. `/swagger-ui/**`/`/v3/api-docs/**`/`/api/v1/auth/login`을 제외한 모든 API는 JWT 인증이 필요합니다(`POST /api/v1/auth/login`으로 발급, `Authorization: Bearer {token}` 헤더로 호출).
 - 감사로그 체인 무결성은 `GET /api/v1/audit/verify`로 확인할 수 있습니다 (`{"valid":true,"totalEntries":N}`, 변조 시 `brokenAtId`/`reason` 포함).
 - 분산 트레이스는 Jaeger UI(`http://localhost:16686`)에서 확인할 수 있습니다. 기본 샘플링은 100%(`management.tracing.sampling.probability: 1.0`)이며, OTLP 엔드포인트는 `application.yaml`의 `management.opentelemetry.tracing.export.otlp.endpoint`에서 로컬 Jaeger를 가리킵니다(실제 배포 환경 OTLP Collector 엔드포인트는 미정 — Infra 협의 필요).
 - EOD 정산 배치는 기본적으로 자동 실행되지 않습니다 (`spring.batch.job.enabled: false`) — 파드 재시작 시 중복 실행을 방지하기 위함이며, `EodSettlementScheduler`의 cron 설정(`eod.batch.cron`)을 통해 트리거됩니다.
