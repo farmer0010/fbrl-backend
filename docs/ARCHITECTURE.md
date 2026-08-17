@@ -23,7 +23,7 @@ com.fbrl
 │   └── service        # UseCase 구현체 (CreateAccountService, TransferSagaOrchestrator, VerifyAuditChainService, ...)
 ├── adapter
 │   ├── in
-│   │   ├── web         # AccountController, TransferMoneyController, TransferApprovalController, AuditController, GlobalExceptionHandler
+│   │   ├── web         # AccountController, TransferMoneyController, TransferApprovalController, ReconciliationDiscrepancyController, EodSnapshotController, BatchJobExecutionController, AuthController, AuditController, GlobalExceptionHandler
 │   │   ├── kafka        # TransferEventConsumer, KafkaRetryTopicConfig
 │   │   ├── batch         # EodSettlementJobConfig, AccountItemReader/Processor/Writer, ReconciliationJobConfig/ItemWriter
 │   │   └── scheduler      # EodSettlementScheduler, ReconciliationScheduler
@@ -33,6 +33,7 @@ com.fbrl
 │       ├── participant     # WithdrawalParticipantAdapter, DepositParticipantAdapter (Saga 참여자)
 │       ├── kubernetes       # KubernetesLeaderElectionAdapter
 │       ├── fraud             # RuleBasedFraudCheckAdapter
+│       ├── batch               # BatchJobExecutionHistoryAdapter
 │       └── serialization     # JacksonPayloadSerializerAdapter
 └── global
     ├── common.annotation   # @DistributedLock, @CheckIdempotency
@@ -229,6 +230,68 @@ com.fbrl
 - `adapter.out.persistence.ReconciliationDiscrepancyJpaEntity` — `(account_number, settlement_date)` 유니크 제약, `@Version` 없음(write-once). `*JpaRepository`는 package-private, `*Mapper`는 public 컨벤션 유지. `DataIntegrityViolationException`은 `DuplicateReconciliationDiscrepancyException`으로 번역.
 - `adapter.in.batch.ReconciliationJobConfig`/`ReconciliationItemWriter` — 별도 `reconciliationJob`, reader는 기존 `AccountItemReader` 재사용(새 `@StepScope` 빈으로만 재선언).
 - `adapter.in.scheduler.ReconciliationScheduler` — `${reconciliation.batch.cron:0 0 3 * * *}`(EOD 이후 시각), ShedLock `@SchedulerLock(name = "reconciliationJob")`.
+
+### 14. 승인 상태(status)와 이체 집행 결과(executionStatus) 분리 — 완료
+
+**문제 상황**: `ApproveTransferService.approve()`는 `request.approve()` + 저장(즉시 커밋되는 독립 트랜잭션)을 먼저 확정한 뒤, 별도 트랜잭션(`TransferMoneyService.transfer()`의 `@DistributedLock` → `AopForTransaction`의 `REQUIRES_NEW`)에서 실제 자금 이동을 시도한다. 두 트랜잭션 사이엔 롤백 연결고리가 없어서, `transfer()`가 이상거래 탐지·잔액 부족 등 어떤 예외로 실패하든 이미 커밋된 승인 상태(`status=APPROVED`)는 그대로 남아 "승인은 됐는데 돈은 안 움직였다"는 사실이 기록에서 사라지는 문제가 실사용 중 재현됨.
+
+**수정 방향 옵션 비교**: (a) `approve()` 전체를 하나의 `@Transactional`로 묶어 `transfer()` 실패 시 승인 상태까지 롤백 — 데이터 정합성은 깔끔해지지만, `transfer()`는 이미 `REQUIRES_NEW`가 걸려 있어 예외가 outer 트랜잭션까지 전파되면 `request.approve()`가 만든 변경 자체가 DB에 반영되지 않고 통째로 사라짐. 감사 관점에서 "체커가 실제로 승인 버튼을 눌렀다"는 행위 자체의 흔적이 없어지는 게 이 프로젝트의 감사로그 철학(과제 15 해시체인 등)과 맞지 않아 기각. (b) 승인 워크플로 상태(`status`)와 집행 결과(`executionStatus`)를 별도 필드로 분리해 둘 다 보존 — **채택**.
+
+**구현**: `TransferApprovalRequest`에 `executionStatus`(`NOT_APPLICABLE`/`EXECUTED`/`FAILED`) + `executionFailureReason` 필드를 추가하고, 기존 `approve()`/`reject()`와 동일한 캡슐화 패턴(`markExecuted()`/`markExecutionFailed(reason)`, 메서드로만 상태 전이)을 따름. `ApproveTransferService.approve()`는 `transfer()` 호출을 try-catch로 감싸 성공/실패에 따라 `executionStatus`를 갱신하고, 실패 시 원래 예외를 그대로 rethrow(호출자 계약 유지). `executionStatus` 저장 자체가 실패하는 2차 예외는 로그만 남기고 원래 예외를 덮어쓰지 않음.
+
+**REQUIRES_NEW 불필요 판단**: `executionStatus` 갱신 저장(`saveApprovalRequestPort.save()`)이 호출하는 Spring Data JPA `save()`는 `SimpleJpaRepository` 레벨에서 이미 자체 트랜잭션으로 커밋된다. `approve()` 자체엔 `@Transactional`이 없어 감쌀 외부 트랜잭션이 존재하지 않으므로, `transfer()`처럼 `REQUIRES_NEW`로 분리할 대상 자체가 없음 — 기존 `AopForTransaction` 패턴을 그대로 가져다 쓸 필요가 없다고 판단.
+
+**재시도 정책은 스코프 밖**: `executionStatus=FAILED`로 남은 건을 재실행시키는 API/운영 절차는 YAGNI로 이번 스코프에서 제외 — `PROGRESS.md` "다음 작업" 참고.
+
+### 15. Command의 makerId/checkerId — 인증된 신원 보장은 웹 어댑터 책임
+
+**결정 사항**: `ApproveTransferCommand`/`RejectTransferCommand`/`RequestTransferApprovalCommand`의 `makerId`/`checkerId`는 인증된 신원이라는 게 웹 어댑터(`TransferApprovalController`)에서만 보장되고, application/domain 계층엔 이를 강제하는 코드가 없다. 향후 컨트롤러를 거치지 않는 새 호출자가 생기면 이 계약을 반드시 인지하고 인증된 신원만 전달해야 한다.
+
+**배경**: `TransferApprovalController`가 `Authentication.getName()`(JWT `sub`, 곧 `AdminUser.username`)에서 makerId/checkerId를 채워 Command를 생성하도록 바꾸면서, Command 레코드 자체의 시그니처(`String makerId`/`String checkerId`)는 그대로 유지했다. `TransferApprovalRequest.assertNotSelfApproval()`의 자기승인 방지도 결국 "두 문자열이 같은가"만 비교하므로, 이 문자열이 실제로 인증된 사용자명이라는 보장은 오직 호출자(현재는 컨트롤러 하나)가 지켜야 하는 계약이지 타입 시스템이나 도메인 불변식으로 강제되지 않는다.
+
+**주의**: `ApproveTransferBypassesWebGateIntegrationTest`처럼 컨트롤러를 거치지 않고 서비스를 직접 호출하는 코드(테스트든 배치든 내부 관리자 CLI든)는 이 계약 밖에 있다 — 임의의 문자열을 makerId/checkerId로 넘겨도 컴파일·런타임 모두 막지 못한다. 새 호출 경로를 추가할 때는 그 경로가 인증된 신원을 전달하는지 직접 확인해야 한다.
+
+### 16. 관리자 조회 API 전체 — 단일 ADMIN 역할 인증만 요구, 역할별 인가 분기 없음
+
+**결정 사항**: 관리자 조회(읽기 전용) API 전체가 `SecurityConfig`의 기존 `anyRequest().authenticated()` 원칙을 그대로 따른다 — 로그인한 관리자면 누구나 호출 가능하고, 엔드포인트별로 별도 역할/권한을 나누지 않는다. 새 역할을 만들지 않는다.
+
+**근거**: 이 프로젝트가 도입한 4-eyes principle(과제 19 Maker-Checker)의 핵심은 "기안자와 승인자가 달라야 한다"는 자기승인 방지(`assertNotSelfApproval`)로 이미 충분히 달성된다 — 이는 역할(Role) 기반이 아니라 행위 주체가 같은지 다른지를 보는 것이라, "누가 기안하고 누가 승인할 수 있는가"를 역할로 세분화할 필요 자체가 없다. `domain.model.AdminRole`도 실제로 `ADMIN` 단일 값만 가진 enum이라, 역할 분기를 추가하는 건 이 프로젝트 스코프(1인/2인 협업, 관리자 화면 하나)에서 과설계로 판단했다.
+
+**적용 범위**: 승인 요청 이력, Reconciliation 불일치 목록, 계좌별 원장, EOD 스냅샷, 배치 Job 이력, Outbox 이벤트 목록 등 신규 조회 API 전부 — 인증(로그인 여부)만 검사하고 인가(역할별 접근 제어)는 두지 않는다. 역할 세분화가 실제로 필요해지는 시점(예: 조회 전용 역할과 승인 가능 역할을 분리해야 하는 요구가 생길 때)이 오면 그때 `AdminRole`에 값을 추가하고 `SecurityConfig`에 경로별 `hasRole(...)` 분기를 넣는 것으로 확장한다(YAGNI).
+
+### 17. 관리자 조회 API 공통 페이지네이션 — Page&lt;T&gt;는 어댑터 내부로 한정
+
+**결정 사항**: 관리자 조회 API 전체가 `application.port.out.PagedResult<T>(List<T> items, long totalElements)`(프레임워크 타입 없는 record)를 Port 반환 타입으로 쓰고, 컨트롤러는 이를 `adapter.in.web.dto.PageResponse<T>(content, totalElements, page, size, totalPages)`로 변환해 응답한다. Spring Data의 `Pageable`/`Page<T>`는 `adapter.out.persistence` 안에서만 쓰고 그 경계를 절대 넘기지 않는다.
+
+**대안 비교**: (a) `Page<T>`를 Port/컨트롤러까지 그대로 노출 — 구현이 가장 빠르지만, 이 프로젝트가 `EntityManager`/K8s Java Client 타입을 Port 시그니처에서 명시적으로 금지한 것과 같은 이유로 어긋남. `PageImpl`의 Jackson 직렬화 형태도 Spring Data 버전에 따라 흔들리는 걸로 잘 알려져 있어 API 계약으로 삼기에 불안정. (b) `PagedResult<T>`/`PageResponse<T>` 자체 래퍼 — **채택**.
+
+**선택 이유**: `LoadAllAccountsPort.loadAccounts(page, size)`(과제 10, `AccountItemReader`가 쓰는 배치 전용 페이징 포트)가 이미 Spring Data 타입 없이 순수 `List<T>` + 정수 `page`/`size`만으로 페이징을 표현해온 전례가 있음 — 다만 그 포트는 total count가 필요 없는 배치 리더 전용이라 관리자 조회 API에는 그대로 재사용할 수 없었음(프론트엔드 페이지네이션 UI는 전체 건수가 필요). `PagedResult<T>`는 그 전례의 "Port엔 프레임워크 타입 금지" 원칙은 유지하면서 `totalElements`만 추가한 형태.
+
+**구현 위치**: JPA 리포지토리(`*JpaRepository`)는 `Pageable pageable` 파라미터를 받아 `Page<T>`를 반환(Spring Data가 공짜로 제공) → `*PersistenceAdapter`가 `Page<T>.getContent()`/`getTotalElements()`를 읽어 `PagedResult<T>`로 변환 → 컨트롤러가 `PageResponse.of(content, totalElements, page, size)`로 최종 변환. `*Mapper`가 도메인 ↔ JPA 엔티티를 변환하는 기존 컨벤션과 동형으로, 계층 경계마다 번역 책임이 있는 구조.
+
+**적용 현황**: 승인 요청 이력(`LoadApprovalRequestPort.search`), Reconciliation 불일치 목록(`LoadReconciliationDiscrepancyPort.search`), 계좌별 원장(`LoadLedgerEntriesPort.loadByAccountNumberAndPeriod`), EOD 스냅샷(`LoadEodSnapshotHistoryPort.byAccountNumber`/`byDate`), Outbox 이벤트 목록(`LoadOutboxEventsPort.loadPage`) — 전부 JPA `Pageable`/`Page<T>` 기반 동일 패턴. 배치 Job 실행 이력(`LoadBatchJobExecutionHistoryPort.recentExecutions`)만 예외 — JPA가 아니라 `JobRepository.getJobInstances(jobName, start, count)`의 자체 offset/limit 파라미터로 페이징하지만, `PagedResult<T>`를 반환한다는 대외 계약은 동일하게 지킴(자세한 내용은 결정 18번).
+
+### 18. 배치 Job 실행 이력 조회를 위해 JobRepository를 실제 Postgres 영속화로 전환
+
+**문제 상황**: 배치 Job 실행 이력 API(결정 17번의 예외 케이스)를 구현하던 중, 이 프로젝트의 `JobRepository`가 Spring Boot 4.0의 `spring-boot-batch` 모듈이 기본 제공하는 `ResourcelessJobRepository`(필드 하나에 "가장 최근 실행된 Job 인스턴스 1개"만 기억하는 인메모리 스텁)라는 걸 발견했다. `BatchAutoConfiguration` 클래스 자체에 "Auto-configuration for Spring Batch **using an in-memory store**"라고 명시돼 있고, `application.yaml`의 `spring.batch.jdbc.initialize-schema: always`는 이 버전에서 대응하는 스키마 초기화 빈이 빠지면서 아무 효과가 없었다 — Postgres에 `BATCH_*` 테이블 자체가 없었음. `DefaultBatchConfiguration.jobRepository()`가 `new ResourcelessJobRepository()`를 하드코딩 반환하기 때문에, DataSource가 있어도 자동으로 JDBC 기반으로 승격되지 않는다. EOD/Reconciliation Job은 지금까지 "단일 테스트 메서드 안에서 1회 실행 후 검증"만 해왔기 때문에 이 제약이 드러나지 않았을 뿐, `JobInstanceAlreadyCompleteException` 기반 재실행 방지도 앱을 재시작하면 무력화되는 기존 잠재 버그였다(이번에 부수적으로 발견).
+
+**대안 비교**: (a) JobRepository를 실제로 영속화되게 고친다 — 기존 EOD/Reconciliation Job에도 영향을 주는 인프라 변경이지만, 배치 Job 이력 API가 애초에 의미를 가지려면 필수. (b) 이번 배치에서 배치 Job 이력 API는 보류하고 인프라 정비 후 재개. (c) `ResourcelessJobRepository`의 제약(최근 실행 1건만)을 그대로 두고 API/테스트를 그 제약에 맞게 작성 — 실제로는 "가장 최근 실행된 Job이 무엇이든 그것"을 돌려주는 사실상 오작동이라 기각. 사용자 확인 후 **(a) 채택**.
+
+**구현**: `src/main/resources/db/batch-schema-postgresql.sql` — Spring Batch 공식 스키마(spring-batch-core jar 내장 `schema-postgresql.sql`)를 그대로 옮기되 모든 `CREATE TABLE`/`CREATE SEQUENCE`에 `IF NOT EXISTS`를 추가해 재실행해도 안전하게(idempotent) 만듦. Spring Batch 테이블은 `@Entity`가 아니라 순수 JDBC 테이블이라 이 프로젝트의 `ddl-auto` 관리 밖에 있으므로, `spring.sql.init.schema-locations`로 이 파일을 지정(효과 없던 `spring.batch.jdbc.initialize-schema`는 제거). `global.config.BatchRepositoryConfig`(`DefaultBatchConfiguration` 상속)가 `jobRepository()` 빈을 `JdbcJobRepositoryFactoryBean`으로 오버라이드해 앱의 실제 `DataSource`/`PlatformTransactionManager`를 사용 — 이 클래스가 `DefaultBatchConfiguration` 타입 빈으로 등록되는 순간 Boot의 `BatchAutoConfiguration`(`@ConditionalOnMissingBean(value = DefaultBatchConfiguration.class, ...)`)이 자동으로 물러남.
+
+**후속 결정 — `spring.sql.init.mode: always`에서 `never`로 전환(push 전 재검토)**: 최초 구현은 `mode: always`로 매 기동마다 스키마를 재적용했다. push 전 "Azure 멀티 replica 동시 기동에서 안전한가"를 재검토하면서, `pgbench`로 8개 동시 커넥션이 같은 `CREATE TABLE IF NOT EXISTS`를 실행하도록 재현한 결과 **30/30 라운드 전부** `ERROR: duplicate key value violates unique constraint "pg_type_typname_nsp_index"`가 발생함을 확인했다 — Postgres MVCC 하에서 "존재 확인 → 생성"이 원자적이지 않아, 완전히 빈 DB에 여러 replica가 동시에 최초 기동하면 실제로 깨진다(한 replica가 커밋한 뒤에는 경쟁 조건이 사라져 재시도 시 100% 성공하는 self-healing 실패이긴 함). 애초에 "Flyway/Liquibase 없이, 앱이 기동 시점에 스키마를 조용히/위험하게 건드리지 않는다"는 원칙을 `ddl-auto: update → validate` 전환(결정 6번 이전 트러블슈팅 기록 참고)으로 이미 값비싸게 학습해뒀는데, 처음 구현에서는 그 원칙에 예외를 뒀던 것 — 재검토 후 예외를 없애고 원칙을 그대로 적용하는 쪽으로 뒤집었다.
+
+**대안 재비교(push 전)**: (a) `mode: always` 유지 — 경쟁 조건이 운영 절차(replica 순차 기동)에 의존해야만 안전, 이 프로젝트의 기존 원칙과도 반대 방향. (b) `mode: never` + 배포 시 수동 1회 적용 — 경쟁 조건 원천 제거, 기존 `ddl-auto` 원칙과 동일선상. 다만 JPA `ddl-auto: validate`와 달리 이 테이블들은 기동 시점 자동 검증 대상이 아니라서, 수동 DDL을 깜빡하면 기동 실패가 아니라 **첫 배치 실행/첫 관리자 API 호출 시점**에야 뒤늦게 드러나는 비대칭이 있음(감수하기로 함, `DEPLOYMENT.md`에 명시). (c) `mode: always` 유지 + Postgres advisory lock으로 감싸 경쟁 조건만 제거 — Flyway/Liquibase가 쓰는 정확한 해법이지만 Spring Boot가 기본 제공하지 않아 커스텀 초기화 빈을 새로 짜야 하고, 이 프로젝트가 마이그레이션 도구 없이 사람이 수동으로 맞추는 컨벤션을 의도적으로 유지해온 것과 결이 다른 신규 자동화 패턴이라 과설계로 판단해 기각. **(b) 채택.**
+
+**로컬/테스트 제로터치 유지**: `SPRING_JPA_HIBERNATE_DDL_AUTO`를 `test`/`bootRun` Gradle 태스크에서만 `update`로 오버라이드해온 것과 동일한 방식으로, `SPRING_SQL_INIT_MODE`도 같은 두 태스크에서 `always`로 오버라이드 — `build.gradle`에서 두 환경변수를 나란히 선언해 "같은 이유로 같이 오버라이드된다"는 게 코드만 봐도 드러나게 함.
+
+### 19. 관리자 조회 API 6종은 읽기 전용 — 배치 처리량/락 경합과 무관, 캐싱 없음(YAGNI)
+
+**결정 사항**: 승인 요청 이력, Reconciliation 불일치 목록, 계좌별 원장, EOD 스냅샷(계좌별/날짜별), 배치 Job 실행 이력, Outbox 이벤트 목록 — 6종 전부 순수 조회(`SELECT`)만 수행하며, 어떤 쓰기 경로(이체, 승인, EOD/Reconciliation 배치)와도 락을 공유하지 않는다. 캐싱 등 추가 최적화는 하지 않았다(YAGNI).
+
+**근거**: `TransferMoneyService.transfer()`의 `@DistributedLock(key = "#command.senderAccountNumber")`, EOD/Reconciliation Job의 청크 단위 쓰기 등 이 프로젝트의 쓰기 경로는 전부 특정 계좌/배치 실행 단위로 락을 잡거나 트랜잭션을 짧게 유지하는 설계인 반면, 이번 6종 API는 전부 `LoadXxxPort` 계열의 단순 페이지 조회이고 그 어떤 서비스 메서드도 락을 잡은 상태에서 이 Port들을 호출하지 않는다. 따라서 조회 트래픽이 늘어나도 이체 처리량이나 배치 실행 시간에 영향을 주지 않는다.
+
+**캐싱을 안 한 이유**: 관리자 화면 조회는 트래픽 규모가 작고(내부 관리자 전용, 다수 동시 사용자 없음), 최신성이 중요한 운영 데이터(승인 대기 현황, 배치 실행 상태 등)라 캐시 무효화 전략을 새로 설계하는 비용이 이득보다 큼. 필요해지면(예: 관리자 화면 응답 지연이 실제로 문제될 때) 그때 추가한다.
 
 ---
 

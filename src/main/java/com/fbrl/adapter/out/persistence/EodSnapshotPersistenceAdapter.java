@@ -1,7 +1,9 @@
 package com.fbrl.adapter.out.persistence;
 
 import com.fbrl.application.port.out.LoadEodSnapshotByDatePort;
+import com.fbrl.application.port.out.LoadEodSnapshotHistoryPort;
 import com.fbrl.application.port.out.LoadLatestEodSnapshotPort;
+import com.fbrl.application.port.out.PagedResult;
 import com.fbrl.application.port.out.SaveEodSnapshotPort;
 import com.fbrl.domain.exception.DuplicateEodSnapshotException;
 import com.fbrl.domain.exception.EodSnapshotPersistenceException;
@@ -14,11 +16,16 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Component;
 
 @Component
 public class EodSnapshotPersistenceAdapter
-    implements SaveEodSnapshotPort, LoadLatestEodSnapshotPort, LoadEodSnapshotByDatePort {
+    implements SaveEodSnapshotPort,
+        LoadLatestEodSnapshotPort,
+        LoadEodSnapshotByDatePort,
+        LoadEodSnapshotHistoryPort {
 
   private final EodSnapshotJpaRepository eodSnapshotJpaRepository;
   private final EodSnapshotMapper eodSnapshotMapper;
@@ -61,6 +68,25 @@ public class EodSnapshotPersistenceAdapter
     } catch (DataAccessException e) {
       throw new EodSnapshotPersistenceException("EOD 스냅샷 배치 조회 중 인프라 예외가 발생했습니다.", e);
     }
+  }
+
+  @Override
+  public PagedResult<EodSnapshot> byAccountNumber(
+      String accountNumber, LocalDate from, LocalDate to, int page, int size) {
+    Page<EodSnapshotJpaEntity> result =
+        eodSnapshotJpaRepository.search(accountNumber, from, to, PageRequest.of(page, size));
+    List<EodSnapshot> items =
+        result.getContent().stream().map(eodSnapshotMapper::toDomain).toList();
+    return new PagedResult<>(items, result.getTotalElements());
+  }
+
+  @Override
+  public PagedResult<EodSnapshot> byDate(LocalDate date, int page, int size) {
+    Page<EodSnapshotJpaEntity> result =
+        eodSnapshotJpaRepository.findBySettlementDate(date, PageRequest.of(page, size));
+    List<EodSnapshot> items =
+        result.getContent().stream().map(eodSnapshotMapper::toDomain).toList();
+    return new PagedResult<>(items, result.getTotalElements());
   }
 
   public void deleteAllInBatch() {

@@ -40,8 +40,11 @@ spring:
   batch:
     job:
       enabled: false
-    jdbc:
-      initialize-schema: always
+
+  sql:
+    init:
+      mode: never
+      schema-locations: classpath:db/batch-schema-postgresql.sql
 
 management:
   tracing:
@@ -70,6 +73,15 @@ k8s:
     lease-duration-seconds: 15
     renew-deadline-seconds: 10
     retry-period-seconds: 2
+
+cors:
+  allowed-origins:
+    - http://localhost:5173
+    - http://localhost:3000
+
+jwt:
+  secret: "local-dev-only-jwt-signing-secret-change-in-production-32bytes-min"
+  expiration-seconds: 3600
 
 approval:
   threshold: 10000000

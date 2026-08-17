@@ -58,6 +58,15 @@ dependencies {
 
 	implementation 'org.springframework.boot:spring-boot-starter-aspectj'
 
+	implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.0'
+
+	implementation 'org.springframework.boot:spring-boot-starter-security'
+	testImplementation 'org.springframework.security:spring-security-test'
+
+	implementation 'io.jsonwebtoken:jjwt-api:0.13.0'
+	runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.13.0'
+	runtimeOnly 'io.jsonwebtoken:jjwt-gson:0.13.0'
+
 	// Lombok
 	compileOnly 'org.projectlombok:lombok'
 	annotationProcessor 'org.projectlombok:lombok'
@@ -94,10 +103,12 @@ tasks.named('test') {
 	useJUnitPlatform()
 	finalizedBy tasks.jacocoTestReport
 	environment "SPRING_JPA_HIBERNATE_DDL_AUTO", "update"
+	environment "SPRING_SQL_INIT_MODE", "always"
 }
 
 tasks.named('bootRun') {
 	environment "SPRING_JPA_HIBERNATE_DDL_AUTO", "update"
+	environment "SPRING_SQL_INIT_MODE", "always"
 }
 
 jacocoTestReport {

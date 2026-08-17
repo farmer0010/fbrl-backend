@@ -140,4 +140,25 @@ public class GlobalExceptionHandler {
     return ResponseEntity.status(HttpStatus.BAD_REQUEST)
         .body(ErrorResponse.of("SUSPICIOUS_TRANSFER", e.getMessage()));
   }
+
+  @ExceptionHandler(InvalidCredentialsException.class)
+  public ResponseEntity<ErrorResponse> handleInvalidCredentialsException(
+      InvalidCredentialsException e) {
+    return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+        .body(ErrorResponse.of("INVALID_CREDENTIALS", e.getMessage()));
+  }
+
+  @ExceptionHandler(DuplicateAdminUsernameException.class)
+  public ResponseEntity<ErrorResponse> handleDuplicateAdminUsernameException(
+      DuplicateAdminUsernameException e) {
+    return ResponseEntity.status(HttpStatus.CONFLICT)
+        .body(ErrorResponse.of("DUPLICATE_ADMIN_USERNAME", e.getMessage()));
+  }
+
+  @ExceptionHandler(AdminUserPersistenceException.class)
+  public ResponseEntity<ErrorResponse> handleAdminUserPersistenceException(
+      AdminUserPersistenceException e) {
+    return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+        .body(ErrorResponse.of("INTERNAL_SERVER_ERROR", "서버 내부 오류가 발생했습니다."));
+  }
 }

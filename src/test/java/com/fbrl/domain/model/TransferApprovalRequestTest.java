@@ -26,6 +26,57 @@ class TransferApprovalRequestTest {
     assertThat(request.getRequestId()).isNotBlank();
     assertThat(request.getMakerId()).isEqualTo(MAKER_ID);
     assertThat(request.getCheckerId()).isNull();
+    assertThat(request.getExecutionStatus()).isEqualTo(ExecutionStatus.NOT_APPLICABLE);
+  }
+
+  @Test
+  @DisplayName("승인만 하고 아직 집행 결과를 기록하지 않으면 executionStatus는 NOT_APPLICABLE로 남는다.")
+  void approve_withoutMarkingExecution_keepsExecutionStatusNotApplicable() {
+    TransferApprovalRequest request =
+        TransferApprovalRequest.request(MAKER_ID, "111-111", "222-222", Money.wons(1_000_000));
+
+    request.approve(CHECKER_ID);
+
+    assertThat(request.getStatus()).isEqualTo(ApprovalStatus.APPROVED);
+    assertThat(request.getExecutionStatus()).isEqualTo(ExecutionStatus.NOT_APPLICABLE);
+  }
+
+  @Test
+  @DisplayName("거절된 요청은 executionStatus가 NOT_APPLICABLE로 남는다.")
+  void reject_keepsExecutionStatusNotApplicable() {
+    TransferApprovalRequest request =
+        TransferApprovalRequest.request(MAKER_ID, "111-111", "222-222", Money.wons(1_000_000));
+
+    request.reject(CHECKER_ID, "한도 초과 우려");
+
+    assertThat(request.getStatus()).isEqualTo(ApprovalStatus.REJECTED);
+    assertThat(request.getExecutionStatus()).isEqualTo(ExecutionStatus.NOT_APPLICABLE);
+  }
+
+  @Test
+  @DisplayName("markExecuted()를 호출하면 executionStatus가 EXECUTED가 되고 실패 사유는 비워진다.")
+  void markExecuted_setsExecutedStatus() {
+    TransferApprovalRequest request =
+        TransferApprovalRequest.request(MAKER_ID, "111-111", "222-222", Money.wons(1_000_000));
+    request.approve(CHECKER_ID);
+
+    request.markExecuted();
+
+    assertThat(request.getExecutionStatus()).isEqualTo(ExecutionStatus.EXECUTED);
+    assertThat(request.getExecutionFailureReason()).isNull();
+  }
+
+  @Test
+  @DisplayName("markExecutionFailed()를 호출하면 executionStatus가 FAILED가 되고 실패 사유가 기록된다.")
+  void markExecutionFailed_setsFailedStatusWithReason() {
+    TransferApprovalRequest request =
+        TransferApprovalRequest.request(MAKER_ID, "111-111", "222-222", Money.wons(1_000_000));
+    request.approve(CHECKER_ID);
+
+    request.markExecutionFailed("이상거래로 의심되어 이체가 차단되었습니다.");
+
+    assertThat(request.getExecutionStatus()).isEqualTo(ExecutionStatus.FAILED);
+    assertThat(request.getExecutionFailureReason()).isEqualTo("이상거래로 의심되어 이체가 차단되었습니다.");
   }
 
   @Test

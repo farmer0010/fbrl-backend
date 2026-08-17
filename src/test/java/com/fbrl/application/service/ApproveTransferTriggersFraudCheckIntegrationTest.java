@@ -11,6 +11,8 @@ import com.fbrl.application.port.in.ApproveTransferUseCase.ApproveTransferComman
 import com.fbrl.application.port.out.SaveLedgerEntryPort;
 import com.fbrl.domain.exception.SuspiciousTransferException;
 import com.fbrl.domain.model.Account;
+import com.fbrl.domain.model.ApprovalStatus;
+import com.fbrl.domain.model.ExecutionStatus;
 import com.fbrl.domain.model.LedgerDirection;
 import com.fbrl.domain.model.LedgerEntry;
 import com.fbrl.domain.model.Money;
@@ -75,5 +77,11 @@ class ApproveTransferTriggersFraudCheckIntegrationTest {
         .isEqualTo(Money.wons(100_000_000));
     assertThat(accountBalanceCalculator.calculate(Account.create(RECEIVER)))
         .isEqualTo(Money.wons(0));
+
+    TransferApprovalRequest persisted =
+        approvalPersistenceAdapter.loadByRequestId(request.getRequestId()).orElseThrow();
+    assertThat(persisted.getStatus()).isEqualTo(ApprovalStatus.APPROVED);
+    assertThat(persisted.getExecutionStatus()).isEqualTo(ExecutionStatus.FAILED);
+    assertThat(persisted.getExecutionFailureReason()).contains("이상거래로 의심되어 이체가 차단되었습니다");
   }
 }

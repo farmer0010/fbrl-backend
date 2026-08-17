@@ -649,8 +649,171 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 - `ReconciliationJobConfigTest`(신규) — NO_SNAPSHOT/MISMATCH 두 경로 모두 Job이 `BatchStatus.COMPLETED`로 끝나고 `ReconciliationDiscrepancy`가 정확히 기록되는지 종단 검증.
 - 전체 테스트(`./gradlew test`) 128개 통과(스킵 1건은 기존 `FbrlBackendApplicationTests`, 본 작업과 무관), `./gradlew spotlessCheck` 통과.
 
+### 과제 23: 승인 상태(status)와 이체 집행 결과(executionStatus) 분리 (완료)
+
+브랜치: `fix/decouple-approval-status-from-execution-result` → `develop` (PR #53)
+
+**배경**
+
+- 포트폴리오 캡처 세션 중 실제로 재현: 이상거래 임계치(5천만원) 이상 금액을 Maker-Checker로 승인해도, `ApproveTransferService.approve()` 내부에서 `transferMoneyUseCase.transfer()`가 `SuspiciousTransferException`으로 실패하면 승인 요청의 `status`는 `APPROVED`로 남고 실제 자금은 이동하지 않는 상태가 확인됨.
+- 원인 조사: `request.approve()` + 저장(`saveApprovalRequestPort.save()`, Spring Data JPA `save()`가 자체 트랜잭션으로 즉시 커밋)과, `transfer()`(`@DistributedLock` → `AopForTransaction`의 `REQUIRES_NEW`로 완전히 별도 트랜잭션)가 서로 롤백 연결고리 없이 분리되어 있어, `transfer()`가 어떤 예외(이상거래뿐 아니라 `InsufficientBalanceException` 등도 동일 구조)로 실패하든 이미 커밋된 승인 상태는 그대로 남는 구조적 문제로 확인.
+
+**설계 결정**
+
+- 승인 워크플로 상태(`status`)는 그대로 두고, 별도 `executionStatus`(`NOT_APPLICABLE`/`EXECUTED`/`FAILED`) + `executionFailureReason` 필드로 "승인 행위 자체는 유효했다"와 "그 승인의 집행이 실패했다"를 분리 — 감사 관점에서 체커가 승인한 사실 자체를 지우지 않는 쪽을 택함(대안으로 `approve()` 전체를 하나의 트랜잭션으로 묶어 실행 실패 시 승인 상태까지 롤백하는 방안도 검토했으나, 그 경우 승인 행위의 흔적 자체가 사라져 기각).
+- `executionStatus` 갱신 저장에 `REQUIRES_NEW`/`AopForTransaction`은 불필요 — `saveApprovalRequestPort.save()`가 호출하는 Spring Data JPA `save()` 자체가 이미 독립 트랜잭션이고, `approve()`엔 애초에 감쌀 외부 트랜잭션이 없어 분리할 대상이 없음.
+- 재시도 API(집행 실패 건을 다시 실행시키는 것)는 이번 스코프에서 의도적으로 제외(YAGNI) — 아래 "다음 작업" 참고.
+
+**구현 내용**
+
+- `domain.model.ExecutionStatus`(신규 enum) / `TransferApprovalRequest.markExecuted()`·`markExecutionFailed(String reason)` — 기존 `approve()`/`reject()`와 동일한 캡슐화 패턴(메서드로만 상태 전이).
+- `ApproveTransferService.approve()` — `transfer()` 호출을 try-catch로 감싸 성공 시 `markExecuted()`, 실패 시 `markExecutionFailed(e.getMessage())` 저장 후 원래 예외를 그대로 rethrow(호출자에게 보이는 예외 타입/메시지는 기존과 동일하게 유지). `executionStatus` 저장 자체가 실패하는 2차 예외는 로그만 남기고 삼킴 — 원래 예외를 덮어쓰지 않음.
+- `TransferApprovalRequestJpaEntity`/`ApprovalRequestMapper` — `execution_status`(`NOT NULL`)/`execution_failure_reason`(nullable) 컬럼 매핑 추가. 이 프로젝트는 Flyway/Liquibase 미사용이라 배포 시 수동 DDL 필요(`docs/DEPLOYMENT.md` "스키마 변경이 포함된 배포" 섹션에 반영).
+
+**테스트**
+
+- `TransferApprovalRequestTest`(도메인 단위) — PENDING/REJECTED 상태에서 `executionStatus`가 `NOT_APPLICABLE`로 유지되는지, `markExecuted()`/`markExecutionFailed()` 각각의 상태 전이 4건 추가.
+- `ApproveTransferTriggersFraudCheckIntegrationTest` — 이상거래로 막힌 건이 `status=APPROVED` + `executionStatus=FAILED`로 남는지 검증 추가(기존 예외 발생 검증은 유지).
+- `ApproveTransferBypassesWebGateIntegrationTest` — 성공 건이 `status=APPROVED` + `executionStatus=EXECUTED`로 남는지 검증 추가.
+- 전체 테스트(`./gradlew test`) 132개 통과(기존 128 + 신규 4), `./gradlew spotlessCheck` 통과.
+
+### 과제 24: Swagger(springdoc-openapi) 도입 (완료)
+
+브랜치: `feat/add-swagger-openapi` → `develop` (PR #54)
+
+**배경**
+
+- API 문서화 수단이 전혀 없어 Postman으로 직접 캡처해가며 API를 파악해야 했음. Postman 캡처를 대체할 인터랙티브 API 문서로 Swagger UI 도입.
+
+**구현 내용**
+
+- `build.gradle`에 `springdoc-openapi-starter-webmvc-ui:3.1.0` 추가 — Spring Boot 4.0.7과 호환되는 최신 버전(Maven Central `maven-metadata.xml`로 직접 확인, 2026-08-01 릴리스).
+- `global.config.OpenApiConfig` — 최소한의 `OpenAPI` 빈(title/version)만 등록. 엔드포인트별 `@Operation`/`@Schema` 문서화는 이번 스코프 아님.
+- Spring Security가 아직 프로젝트에 없어 별도 `permitAll` 설정 없이 `/swagger-ui/**`, `/v3/api-docs/**`가 바로 열림 — 추후 Security 도입 시 허용 목록에 추가 필요.
+
+**검증**
+
+- `./gradlew compileJava`/`spotlessCheck` 통과, 로컬 `bootRun`으로 실기동 확인(`GET /v3/api-docs` → 200, `GET /swagger-ui/index.html` → 200).
+
+### 과제 25: makerId/checkerId를 인증 컨텍스트로 연결 (완료)
+
+브랜치: `feat/wire-authenticated-principal-to-approval-workflow` → `develop`
+
+**배경**
+
+- 과제 19(Maker-Checker)에서 승인 워크플로를 도입했을 때는 아직 인증 인프라가 없어 `makerId`/`checkerId`를 요청 본문에서 그대로 받는 구조였음(호출자가 아무 문자열이나 넣을 수 있어 자기승인 방지도 신뢰할 수 없었음). 그 사이 관리자 인증 인프라(AdminUser/JWT, `feat/auth-infrastructure`)가 먼저 들어오면서, 승인 워크플로 3개 엔드포인트가 여전히 요청 본문으로 신원을 받는 게 인증 인프라 도입 취지와 어긋나는 상태로 남아 있었음.
+
+**구현 내용**
+
+- `RequestTransferApprovalRequest`/`RejectTransferRequest`에서 makerId/checkerId 필드 제거, `toCommand()`가 인증된 사용자명을 파라미터로 받도록 변경. `ApproveTransferRequest`는 필드가 checkerId뿐이라 빈 DTO만 남아 삭제 — `approve()`는 `@RequestBody` 없이 `Authentication`만 받음.
+- `TransferApprovalController`의 `requestApproval()`/`approve()`/`reject()` 세 메서드 모두 `Authentication` 파라미터를 추가해 `authentication.getName()`(JWT `sub` = `AdminUser.username`)으로 Command를 채움. `ApproveTransferCommand`/`RejectTransferCommand`/`RequestTransferApprovalCommand` 시그니처 자체는 유지 — application/domain 계층 변경 최소화.
+- `OpenApiConfig`에 `bearerAuth` `SecurityScheme` + 전역 `SecurityRequirement` 등록, Swagger UI에서 인증 필요 엔드포인트가 자물쇠 아이콘으로 표시되도록 함.
+
+**테스트**
+
+- `TransferApprovalControllerTest`를 mock 기반 standalone 테스트에서 `@SpringBootTest`+`@AutoConfigureMockMvc`로 전환 — `@WithMockUser`는 이 프로젝트 필터 체인에 반영되지 않는다는 게 이미 확인된 사실(`IdempotencyIntegrationTest` 사례)이라, `LoginIntegrationTest`처럼 실제 `/api/v1/auth/login`으로 발급받은 JWT를 `Authorization` 헤더에 실어 검증.
+- 자기승인 방지를 "손으로 다르게 넣은 문자열 비교"가 아니라 같은 로그인 세션으로 기안 후 그 세션 그대로 승인/거절을 시도해 `SelfApprovalNotAllowedException`(400)이 재현되는지 검증(`approveBySameLoginSession_isRejectedAsSelfApproval`, `rejectBySameLoginSession_isRejectedAsSelfApproval`). 서로 다른 두 관리자 계정으로 기안/승인·거절 시 정상 처리되고 `checkerId`/`rejectionReason`이 실제로 저장되는지도 함께 검증.
+- `ApproveTransferBypassesWebGateIntegrationTest`/`ApproveTransferTriggersFraudCheckIntegrationTest`는 컨트롤러를 거치지 않고 `ApproveTransferService`를 직접 호출하는 구조라 Authentication과 무관 — Command 시그니처가 유지되므로 변경 없음.
+- 전체 테스트(`./gradlew test`) 145개 통과, `./gradlew spotlessCheck` 통과.
+
+**설계 결정**: Command의 makerId/checkerId가 "인증된 신원"이라는 보장이 컨트롤러(웹 어댑터)에서만 성립하고 application/domain 계층엔 이를 강제하는 코드가 없다는 점을 `ARCHITECTURE.md` 결정 15번으로 기록 — 자세한 내용은 [`ARCHITECTURE.md`](./ARCHITECTURE.md) 참고.
+
+### 과제 26: Security 에러 응답 UTF-8 인코딩 수정 (완료)
+
+브랜치: `chore/fix-error-response-charset` → `develop` (PR #62)
+
+**배경**
+
+- 관리자 조회 API 배치1의 curl 검증 도중, 인증 실패(401) 응답의 한글 메시지가 `?`로 깨져 나오는 걸 우연히 발견. `SecurityConfig.writeErrorResponse()`(401 `authenticationEntryPoint`/403 `accessDeniedHandler`가 공유하는 메서드)가 `response.setContentType()`만 호출하고 `setCharacterEncoding()`을 호출하지 않아, 서블릿 컨테이너가 플랫폼 기본 인코딩(ISO-8859-1)으로 응답 바디를 써서 한글이 깨졌음. `GlobalExceptionHandler`의 다른 에러 응답들은 `ResponseEntity` + Jackson `HttpMessageConverter` 경로라 이 문제와 무관.
+
+**구현 내용**
+
+- `writeErrorResponse()`에 `response.setCharacterEncoding("UTF-8")`을 `setContentType()`보다 먼저 호출하도록 추가. 401/403 두 핸들러가 이 메서드 하나를 공유하므로 한 줄 수정으로 둘 다 해결됨(403은 이 프로젝트에 역할 기반 인가 자체가 없어 실제로 트리거되지는 않지만 — 결정 16번 — 같은 코드 경로이므로 구조적으로 함께 고쳐짐).
+
+**테스트**
+
+- `LoginIntegrationTest`에 `protectedEndpoint_withoutToken_returnsUtf8EncodedErrorBody` 추가 — 응답 `Content-Type`에 `charset=UTF-8` 포함 여부와 한글 메시지 원문을 검증. 수정 전 코드로 되돌려 이 테스트가 실제로 실패하는 것까지 확인한 뒤 재적용(회귀 테스트가 실제로 회귀를 잡는지 검증).
+- `bootRun` 실기동 후 `xxd`로 raw 바이트 직접 확인 — 수정 전 `3f 3f 3f`(`?`)였던 자리가 수정 후 유효한 UTF-8 멀티바이트 시퀀스로 바뀜.
+- 전체 테스트 146개 통과.
+
+### 과제 27: 관리자 조회 API 배치1 — 승인이력/Reconciliation목록/원장조회 (완료)
+
+브랜치: `feat/admin-query-apis-batch1` → `develop` (PR #63)
+
+**배경**
+
+- 관리자 프론트엔드가 필요로 하는 조회(읽기 전용) API 6종을 1단계 조사 문서로 먼저 설계 확정한 뒤, 공통 패턴(페이지네이션/필터/날짜 타입/인증)을 하나로 정하고 6개 중 3개를 이번 배치에서 구현.
+
+**구현 내용**
+
+- `application.port.out.PagedResult<T>`(items, totalElements)/`adapter.in.web.dto.PageResponse<T>`(content/totalElements/page/size/totalPages) 신설 — `Pageable`/`Page<T>`는 `adapter.out.persistence` 내부로만 한정하고, Port/응답 계층엔 프레임워크 타입을 노출하지 않음(자세한 내용은 `ARCHITECTURE.md` 결정 17번 참고).
+- ① 승인 요청 이력: `LoadApprovalRequestPort.search()` 추가(기존 `loadByStatus`는 유지), `GET /api/v1/transfer-approvals`(status 선택 필터 + from/to `Instant` + page/size).
+- ② Reconciliation 불일치 목록: `LoadReconciliationDiscrepancyPort` 신규, `ReconciliationDiscrepancyController` 신규, `GET /api/v1/reconciliation-discrepancies`(status 선택 필터 + from/to `LocalDate`).
+- ③ 계좌별 원장 조회: `LoadLedgerEntriesPort.loadByAccountNumberAndPeriod()` 추가(기존 `loadByAccountNumberSince`는 Reconciliation 배치가 그대로 사용 중이라 유지), `AccountController`에 `GET /{accountNumber}/ledger-entries` 추가.
+- 전부 `SecurityConfig`의 기존 `anyRequest().authenticated()` 원칙 그대로 — 역할 세분화 없이 로그인 여부만 검사(`ARCHITECTURE.md` 결정 16번, 이번 과제에서 함께 기록).
+
+**테스트**
+
+- Port 구현체별로 필터 조합/기간 범위/페이지네이션 경계(전체 건수보다 큰 페이지 요청 시 빈 content) 검증.
+- 컨트롤러는 실제 로그인 세션(JWT)으로 200을 확인하고 인증 없이 호출 시 401도 함께 검증.
+- 전체 테스트 162개 통과.
+
+### 과제 28: 관리자 조회 API 배치2 — EOD 스냅샷 조회 (완료)
+
+브랜치: `feat/admin-query-apis-batch2` → `develop`
+
+**배경**
+
+- 배치1과 동일한 공통 패턴으로 6종 중 EOD 스냅샷 조회 2개(계좌별 히스토리 / 날짜별 전체 계좌)를 구현.
+
+**구현 내용**
+
+- `LoadEodSnapshotHistoryPort` 신규(`byAccountNumber`/`byDate`) — 기존 `LoadLatestEodSnapshotPort`(계좌 1개의 최신 스냅샷 1건, 잔액 계산 앵커용)와 `LoadEodSnapshotByDatePort`(계좌 목록 + 정확한 날짜 1개, Reconciliation 배치 전용 벌크 조회, `Map` 반환)는 이름은 비슷하지만 목적이 전혀 달라 손대지 않음.
+- `AccountController`에 `GET /{accountNumber}/eod-snapshots`(계좌 하위 자원 — 배치1의 `ledger-entries`와 동일 패턴으로 기존 컨트롤러에 귀속), 신규 `EodSnapshotController`에 `GET /api/v1/eod-snapshots?date=`(어떤 기존 프리픽스에도 속하지 않는 독립 최상위 자원 — 배치1의 `ReconciliationDiscrepancyController` 신설과 동일한 논리로 컨트롤러 분리).
+- nullable `LocalDate` 파라미터가 `IS NULL` 단독 위치에서 Postgres가 파라미터 타입을 추론하지 못하는 문제(`could not determine data type of parameter`)를 실제 테스트로 발견 — `cast(:param as date)`를 명시적으로 추가해 해결(배치1에서 같은 nullable-OR 패턴을 쓴 `ApprovalStatus`는 캐스트 없이도 통과했던 것과 대비됨, 트러블슈팅 섹션에 원인 기록).
+
+**테스트**
+
+- Port 구현체 테스트(전체 조회/기간 범위/`byDate`), 컨트롤러는 실제 로그인 세션 통합 테스트 + 인증 없이 401, 페이지네이션 경계.
+- 전체 테스트 174개 통과.
+
+### 과제 29: 관리자 조회 API 배치3(배치 Job 이력/Outbox 이벤트) — 6종 완료, JobRepository 실제 영속화로 전환 (완료)
+
+브랜치: `feat/admin-query-apis-batch3` → `develop`
+
+**배경**
+
+- 1단계 조사에서 확정한 관리자 조회 API 6종 중 마지막 2개(배치 Job 실행 이력, Outbox 감사로그 이벤트 목록)를 구현. 이번 배치를 마지막으로 6종 전부 완료.
+
+**중대 발견 — JobRepository가 실제로는 Postgres에 영속화되지 않고 있었음**: 배치 Job 이력 조회 기능을 테스트하던 중, 이 프로젝트의 `JobRepository`가 Spring Boot 4.0의 `spring-boot-batch` 모듈이 기본 제공하는 `ResourcelessJobRepository`(필드 하나에 "가장 최근 실행된 Job 인스턴스 1개"만 기억하는 인메모리 스텁)였다는 걸 확인했다. `application.yaml`의 `spring.batch.jdbc.initialize-schema: always`는 Boot 4에서 이 기능을 제공하던 스키마 초기화 빈 자체가 `spring-boot-batch` 모듈에서 빠지면서 아무 효과가 없었고, Postgres에 `BATCH_*` 테이블이 아예 없었다(`BatchAutoConfiguration` 클래스 자체에 "Auto-configuration for Spring Batch **using an in-memory store**"라고 명시돼 있음). `DefaultBatchConfiguration.jobRepository()`가 `new ResourcelessJobRepository()`를 하드코딩해서 반환하기 때문에, DataSource가 있어도 자동으로 JDBC 기반으로 승격되지 않음. EOD/Reconciliation Job은 "당일 1회만 실행"을 단일 테스트 메서드 안에서만 검증해왔기 때문에 이 제약이 지금까지 드러나지 않았을 뿐, **`JobInstanceAlreadyCompleteException` 기반 재실행 방지도 지금까지는 앱을 재시작하면 무력화되는 상태**였다(부수적으로 함께 발견된 기존 잠재 버그).
+
+**해결**: 사용자 확인 후 JobRepository를 실제로 Postgres에 영속화되도록 전환(1개 옵션 제시 후 채택 — 대안은 "이번 배치에서 배치 Job 이력 기능 보류"였음).
+- `src/main/resources/db/batch-schema-postgresql.sql` — Spring Batch 공식 `schema-postgresql.sql`(spring-batch-core jar 내장)을 그대로 가져오되, 모든 `CREATE TABLE`/`CREATE SEQUENCE`에 `IF NOT EXISTS`를 추가해 매 기동마다 재실행해도 안전하게(idempotent) 만듦. 이 프로젝트는 Flyway/Liquibase를 쓰지 않아 JPA 엔티티는 `ddl-auto`로 관리하지만, Spring Batch 스키마는 `@Entity`가 아니라 순수 JDBC 테이블이라 그 메커니즘 밖에 있음 — 대신 `spring.sql.init.schema-locations`로 이 파일을 지정하고 `spring.sql.init.mode: always`로 매 기동 시 실행되게 함(효과 없던 `spring.batch.jdbc.initialize-schema` 설정은 제거).
+- `global.config.BatchRepositoryConfig`(`DefaultBatchConfiguration` 상속) — `jobRepository()` 빈을 오버라이드해 `JdbcJobRepositoryFactoryBean`으로 앱의 실제 `DataSource`/`PlatformTransactionManager`를 사용하도록 교체. 이 클래스가 `DefaultBatchConfiguration` 타입 빈으로 등록되는 순간 Boot의 `BatchAutoConfiguration`(`@ConditionalOnMissingBean(value = DefaultBatchConfiguration.class, ...)`)이 자동으로 물러남.
+- 부수 효과: EOD/Reconciliation Job의 재실행 방지 보호도 이제 앱 재시작 후에도 실제로 유지됨(위 잠재 버그 해결).
+
+**구현 내용**
+
+- `BatchJobExecutionSummary`(`application.port.out`, `domain.model` 아님) — 은행 업무 도메인이 아니라 Spring Batch 인프라 메타데이터라 `domain.model`에 두지 않고, `GetAccountUseCase.AccountDetail`처럼 Port 전용 결과 레코드를 Port 근처에 두는 기존 전례를 따름. `status` 필드는 `BatchStatus`(프레임워크 타입)를 그대로 안 쓰고 `String`으로 변환해 어댑터 밖으로 프레임워크 타입이 새지 않게 함.
+- `LoadBatchJobExecutionHistoryPort`/`adapter.out.batch.BatchJobExecutionHistoryAdapter`(신규 패키지) — `JobRepository`(`JobExplorer` 아님 — Batch 6.0부터 `@Deprecated(forRemoval=true)`)를 감싸 `JobExecution`/`JobInstance` 같은 프레임워크 타입이 어댑터 밖으로 새지 않게 번역. `getJobInstances(jobName, start, count)`로 페이지를 가져오고 `getJobExecutions(instance)`로 실행 이력을 펼침, `getJobInstanceCount(jobName)`으로 totalElements 계산(`NoSuchJobException`은 "한 번도 안 돈 Job"으로 보고 0 처리).
+- 신규 `BatchJobExecutionController` — `GET /api/v1/batch-jobs/{jobName}/executions`.
+- `LoadOutboxEventsPort`(신규, `loadPage`) — 기존 `LoadAllOutboxEventsPort.loadAllOrderedById()`(무제한 List, `/verify` 전용 해시체인 전량 검증에는 정당)는 손대지 않음. `OutboxEventJpaRepository`에 `Pageable` 오버로드 추가.
+- 기존 `AuditController`에 `GET /api/v1/audit/events` 추가(새 컨트롤러 만들지 않음 — `/verify`와 같은 리소스군). `OutboxEventResponse`는 `aggregateType`/`aggregateId`/`eventType`/`createdAt`만 노출 — `entryHash`/`previousHash`는 해시체인 무결성 검증(`/verify`)의 내부 계산값이라 목록 조회에는 노출하지 않음(최소 필드 원칙).
+
+**테스트**
+
+- `BatchJobExecutionHistoryAdapterTest` — `eodSettlementJob`/`reconciliationJob`을 실제로 각각 launch해 실행 이력을 만든 뒤, jobName으로 조회하면 서로 섞이지 않고 정확히 해당 Job 것만 반환되는지 검증(이 기능의 핵심 정합성). 배치 메타데이터 테이블은 `JdbcTemplate`으로 직접 `TRUNCATE`해 격리(`JobRepositoryTestUtils.removeJobExecutions()`는 실행(Execution) 없이 인스턴스만 있는 행을 정리하지 못하는 gap이 있어 이 프로젝트의 `deleteAllInBatch()` 컨벤션과 동일하게 직접 초기화하는 쪽을 택함).
+- `BatchJobExecutionControllerTest`/`AuditControllerTest` — 실제 로그인 세션 통합 테스트 + 인증 없이 401, 페이지네이션 경계.
+- `OutboxPersistenceAdapterTest`에 `loadPage()` 단위 테스트 추가.
+- 전체 테스트(`./gradlew test`) 183개 통과, `./gradlew spotlessCheck` 통과.
+
+**문서**: `ARCHITECTURE.md`에 JobRepository 실제 영속화 결정(18번)과 관리자 조회 API 6종이 배치 처리량/락 경합과 무관하다는 결정(19번)을 기록. `README.md`에 6종(엔드포인트 기준 7개) 전체 목록 표 추가.
+
 ## 🚧 다음 작업
 
+- (보류) 승인은 됐으나 집행(실제 이체) 실패한 건의 재시도 정책 — 과제 23에서 `TransferApprovalRequest.executionStatus`(NOT_APPLICABLE/EXECUTED/FAILED)로 "승인 행위"와 "집행 결과"를 분리했지만, `executionStatus=FAILED`로 남은 건을 재시도시킬 API/운영 절차는 이번 스코프에서 의도적으로 제외(YAGNI). 재시도 API 필요 시: 같은 요청을 다시 집행할지, 아니면 신규 승인 요청을 처음부터 다시 만들게 할지부터 결정 필요.
+- CI 파이프라인 부재 — GitHub Actions로 PR마다 `./gradlew test` 자동 실행하는 게 없어, 지금까지는 사람이 매번 로그를 직접 요구해서 확인. "재현 가능한 품질 관리"를 위해 다음 세션 우선순위로 권장.
+- 엔드포인트별 Swagger `@Operation`/`@Schema` 문서화 — 과제 24에서 최소 설정만 도입, 상세 문서화는 제외(YAGNI).
 - 트랙 3(장애 복구 & 카오스 엔지니어링) 두 과제(Kafka DLQ, Resilience4j) 완료 — 3개 트랙(실시간 트랜잭션/EOD 배치/장애복구) 모두 핵심 구현 최소 1개 이상 완료.
 - (협업 필요) Chaos Mesh 인프라 결함 주입 — 노션 "프로젝트 개요"상 Infra(김준희) 담당 업무. 백엔드가 처음부터 CRD/클러스터까지 다 짜는 게 아니라, "어떤 장애 시나리오로 무엇(서킷 브레이커/재시도 등)을 검증할지"를 먼저 정의해 인프라 담당자와 공유하고, 실제 장애 주입 후 애플리케이션 반응을 검증하는 역할 분담으로 진행할 것
 - (보류) 실제 Kafka 브로커 기반 재시도 토픽 → DLT 라우팅 통합 테스트 (과제 11에서 범위 분리)
@@ -658,7 +821,7 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 - (보류) Debezium EventRouter SMT의 `table.fields.additional.placement`(trace_id/span_id 헤더 라우팅)를 커버하는 자동화된 통합 테스트 — 위 두 항목과 같은 이유(실제 Kafka 브로커 필요)로 보류, 현재는 로컬 수동 검증으로만 확인됨(과제 17 참고)
 - (보류) Testcontainers 기반 통합 테스트 재검증 — 프로젝트 전체가 docker-compose 기반 통합 테스트 컨벤션을 일관되게 쓰고 있어 현재는 도입 보류로 결정(Testcontainers는 이 컨벤션과 공존 시 일관성이 깨짐, YAGNI)
 - (권장) 실제 배포 대상 Postgres에 `accounts.balance` 컬럼 등 orphan 컬럼이 남아있다면 `ALTER TABLE ... DROP COLUMN`으로 별도 정리 필요(과제 16 참고, 이 프로젝트는 Flyway/Liquibase 미사용)
-- (보류) Reconciliation Job 레벨 사전 게이트(`JobExplorer`로 당일 `eodSettlementJob` 완료 여부를 확인 후 스킵) — 계좌별 `NO_SNAPSHOT` 분류만으로도 "EOD가 안 돌았다"는 사실이 이미 드러나므로 이번 스코프에서는 제외(YAGNI). 알림이 너무 많이 쌓여 노이즈가 문제되면 추가(과제 22 참고)
+- (보류) Reconciliation Job 레벨 사전 게이트(당일 `eodSettlementJob` 완료 여부를 확인 후 스킵, 구현 시 `JobExplorer`가 아니라 `JobRepository` 사용 — 과제 29에서 `JobRepository`가 실제로 Postgres에 영속화되도록 이미 전환됨) — 계좌별 `NO_SNAPSHOT` 분류만으로도 "EOD가 안 돌았다"는 사실이 이미 드러나므로 이번 스코프에서는 제외(YAGNI). 알림이 너무 많이 쌓여 노이즈가 문제되면 추가(과제 22 참고)
 
 ## 🤖 AI 에이전트(Claude Code) 활용 방침
 
@@ -710,7 +873,10 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 - Flyway/Liquibase 없이 `ddl-auto: update`만 쓰는 프로젝트에서 엔티티 필드를 제거해도 물리 컬럼은 DROP되지 않고 NOT NULL 제약만 orphan으로 남아 INSERT가 깨질 수 있음 — 로컬 DB에 이전 브랜치/이전 스키마 잔재가 없는지 항상 의심할 것(과제 16)
 - 두 값(예: DEBIT/CREDIT 쌍)의 불변식을 지키려면 "따로 만들고 나중에 검증"(validate-after)보다 "애초에 어긋난 값을 만들 수 없는 시그니처"(invariant-by-construction, 예: `LedgerEntry.transferPair`가 두 다리에 동일 `Money` 인스턴스를 강제)가 더 신뢰도 높음
 - "존재하지 않아서 우연히 막히는" 방어(예: sentinel 계좌번호가 실제 row가 없어서 조회 실패로 차단됨)는 나중에 그 전제가 깨지면 조용히 무력화되므로, 알아챈 즉시 명시적 가드 클로즈 + 전용 도메인 예외로 전환할 것(과제 16, `ReservedAccountException`)
+- JPQL에서 `:param is null or column = :param` 패턴으로 nullable 필터를 구현할 때, `@Query`의 `countQuery`는 항상 명시적으로 같이 작성할 것(과제 27) — Spring Data의 자동 count 쿼리 유도가 조건절이 복잡해질수록 실패하거나 성능이 나빠질 수 있음. 또한 파라미터 타입에 따라 이 패턴 자체가 Postgres에서 깨질 수 있음: `LocalDate`처럼 `IS NULL` 단독 위치에서 타입을 추론할 문맥이 없는 파라미터는 `could not determine data type of parameter` 오류가 나므로 `cast(:param as date)`를 명시해야 함 — 반면 `@Enumerated(STRING)` enum은 같은 패턴이 캐스트 없이도 통과함(과제 28)
+- Spring Batch 6.0부터 `org.springframework.batch.core.repository.explore.JobExplorer`는 `@Deprecated(forRemoval = true)`(6.2+ 제거 예정) — 읽기 기능은 전부 `org.springframework.batch.core.repository.JobRepository`가 흡수(`JobRepository extends JobExplorer`). 배치 Job 이력을 다루는 신규 코드는 `JobExplorer`가 아니라 `JobRepository`를 참조할 것(과제 29에서 `BatchJobExecutionHistoryAdapter`에 적용)
+- Spring Boot 4.0의 `spring-boot-batch` 모듈은 기본적으로 `JobRepository`를 **인메모리 전용**(`ResourcelessJobRepository`)으로 구성한다(`BatchAutoConfiguration` 클래스 javadoc에 명시). `spring.batch.jdbc.initialize-schema` 프로퍼티는 이 버전에서 대응하는 스키마 초기화 빈이 없어 아무 효과가 없음 — 실제로 Postgres에 영속화하려면 `DefaultBatchConfiguration`을 상속한 자체 `@Configuration`에서 `jobRepository()` 빈을 `JdbcJobRepositoryFactoryBean`으로 오버라이드하고, Spring Batch 공식 스키마(`schema-postgresql.sql`, spring-batch-core jar 내장)를 직접 적용해야 함(과제 29, `BatchRepositoryConfig`). `ResourcelessJobRepository`는 필드 하나에 최근 실행 1건만 기억해 `JobInstanceAlreadyCompleteException` 기반 재실행 방지도 앱 재시작 시 무력화됨 — EOD/Reconciliation Job처럼 이미 이 저장소를 쓰던 기존 Job에도 해당되는 잠재 버그였음(과제 29에서 함께 해결)
 
 ---
 
-마지막 업데이트: 2026-08-16
+마지막 업데이트: 2026-08-17
