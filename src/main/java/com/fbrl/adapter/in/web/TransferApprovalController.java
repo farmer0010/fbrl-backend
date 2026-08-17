@@ -1,12 +1,12 @@
 package com.fbrl.adapter.in.web;
 
 import com.fbrl.adapter.in.web.dto.ApprovalDecisionResponse;
-import com.fbrl.adapter.in.web.dto.ApproveTransferRequest;
 import com.fbrl.adapter.in.web.dto.PendingApprovalResponse;
 import com.fbrl.adapter.in.web.dto.RejectTransferRequest;
 import com.fbrl.adapter.in.web.dto.RequestTransferApprovalRequest;
 import com.fbrl.adapter.in.web.dto.TransferApprovalDetailResponse;
 import com.fbrl.application.port.in.ApproveTransferUseCase;
+import com.fbrl.application.port.in.ApproveTransferUseCase.ApproveTransferCommand;
 import com.fbrl.application.port.in.GetApprovalRequestUseCase;
 import com.fbrl.application.port.in.GetPendingApprovalsUseCase;
 import com.fbrl.application.port.in.RejectTransferUseCase;
@@ -15,6 +15,7 @@ import com.fbrl.application.port.in.RequestTransferApprovalUseCase.ApprovalReque
 import jakarta.validation.Valid;
 import java.util.List;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -47,9 +48,9 @@ public class TransferApprovalController {
 
   @PostMapping
   public ResponseEntity<ApprovalDecisionResponse> requestApproval(
-      @Valid @RequestBody RequestTransferApprovalRequest request) {
+      @Valid @RequestBody RequestTransferApprovalRequest request, Authentication authentication) {
     ApprovalRequestResult result =
-        requestTransferApprovalUseCase.requestApproval(request.toCommand());
+        requestTransferApprovalUseCase.requestApproval(request.toCommand(authentication.getName()));
     return ResponseEntity.ok(new ApprovalDecisionResponse(result.requestId(), result.status()));
   }
 
@@ -72,15 +73,20 @@ public class TransferApprovalController {
 
   @PostMapping("/{requestId}/approve")
   public ResponseEntity<ApprovalDecisionResponse> approve(
-      @PathVariable String requestId, @Valid @RequestBody ApproveTransferRequest request) {
-    var result = approveTransferUseCase.approve(request.toCommand(requestId));
+      @PathVariable String requestId, Authentication authentication) {
+    var result =
+        approveTransferUseCase.approve(
+            new ApproveTransferCommand(requestId, authentication.getName()));
     return ResponseEntity.ok(new ApprovalDecisionResponse(result.requestId(), result.status()));
   }
 
   @PostMapping("/{requestId}/reject")
   public ResponseEntity<ApprovalDecisionResponse> reject(
-      @PathVariable String requestId, @Valid @RequestBody RejectTransferRequest request) {
-    var result = rejectTransferUseCase.reject(request.toCommand(requestId));
+      @PathVariable String requestId,
+      @Valid @RequestBody RejectTransferRequest request,
+      Authentication authentication) {
+    var result =
+        rejectTransferUseCase.reject(request.toCommand(requestId, authentication.getName()));
     return ResponseEntity.ok(new ApprovalDecisionResponse(result.requestId(), result.status()));
   }
 }
