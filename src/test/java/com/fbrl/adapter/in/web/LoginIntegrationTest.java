@@ -1,5 +1,6 @@
 package com.fbrl.adapter.in.web;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -8,6 +9,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.fbrl.adapter.out.persistence.AdminUserPersistenceAdapter;
 import com.fbrl.application.port.out.SaveAdminUserPort;
 import com.fbrl.domain.model.AdminUser;
+import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -16,6 +18,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import tools.jackson.databind.JsonNode;
@@ -108,5 +111,20 @@ class LoginIntegrationTest {
                 .header(HttpHeaders.AUTHORIZATION, "Bearer not-a-real-token"))
         .andExpect(status().isUnauthorized())
         .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+  }
+
+  @Test
+  @DisplayName("401 응답의 Content-Type에 charset=UTF-8이 포함되어 한글 메시지가 깨지지 않는다.")
+  void protectedEndpoint_withoutToken_returnsUtf8EncodedErrorBody() throws Exception {
+    MockHttpServletResponse response =
+        mockMvc
+            .perform(get("/api/v1/accounts/no-such-account"))
+            .andExpect(status().isUnauthorized())
+            .andReturn()
+            .getResponse();
+
+    assertThat(response.getContentType()).contains("charset=UTF-8");
+    assertThat(response.getContentAsString(StandardCharsets.UTF_8))
+        .contains("인증이 필요합니다. 로그인 후 토큰을 포함해 다시 요청하세요.");
   }
 }
