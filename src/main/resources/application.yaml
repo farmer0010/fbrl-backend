@@ -46,6 +46,15 @@ spring:
       mode: never
       schema-locations: classpath:db/batch-schema-postgresql.sql
 
+kafka:
+  consumer:
+    group-id: ${KAFKA_CONSUMER_GROUP_ID:transfer-event-processor}
+  topic:
+    transfer-events: ${KAFKA_TOPIC_TRANSFER_EVENTS:transfer-events}
+
+shedlock:
+  environment: ${SHEDLOCK_ENVIRONMENT:fbrl-backend}
+
 management:
   tracing:
     sampling:
