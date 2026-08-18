@@ -14,7 +14,7 @@
 ```
 com.fbrl
 ├── domain
-│   ├── model       # Account, Money, TransferSaga, SagaStatus, OutboxEvent, EodSnapshot, InterestPolicy, ReconciliationDiscrepancy, ReconciliationStatus, LedgerBalanceDelta
+│   ├── model       # Account, Money, SystemAccounts, LedgerEntry, LedgerDirection, LedgerBalanceDelta, TransferSaga, SagaStatus, OutboxEvent, EodSnapshot, InterestPolicy, ReconciliationDiscrepancy, ReconciliationStatus, ApprovalPolicy, ApprovalStatus, TransferApprovalRequest, ExecutionStatus, FraudPolicy, AdminUser, AdminRole
 │   ├── exception    # 도메인 전용 예외 (프레임워크 예외 번역 대상)
 │   └── event        # TransferCompletedEvent
 ├── application
@@ -23,10 +23,11 @@ com.fbrl
 │   └── service        # UseCase 구현체 (CreateAccountService, TransferSagaOrchestrator, VerifyAuditChainService, ...)
 ├── adapter
 │   ├── in
-│   │   ├── web         # AccountController, TransferMoneyController, TransferApprovalController, ReconciliationDiscrepancyController, EodSnapshotController, BatchJobExecutionController, AuthController, AuditController, GlobalExceptionHandler
+│   │   ├── web         # AccountController, TransferMoneyController, TransferApprovalController, ReconciliationDiscrepancyController, EodSnapshotController, BatchJobExecutionController, AuthController, AuditController, JwtAuthenticationFilter, GlobalExceptionHandler
 │   │   ├── kafka        # TransferEventConsumer, KafkaRetryTopicConfig
-│   │   ├── batch         # EodSettlementJobConfig, AccountItemReader/Processor/Writer, ReconciliationJobConfig/ItemWriter
-│   │   └── scheduler      # EodSettlementScheduler, ReconciliationScheduler
+│   │   ├── batch         # EodSettlementJobConfig, EodInfraCheckJobConfig, AccountItemReader, AccountInterestItemProcessor, EodSnapshotItemWriter, TrialBalanceVerificationTasklet, ReconciliationJobConfig, ReconciliationItemWriter
+│   │   ├── scheduler      # EodSettlementScheduler, ReconciliationScheduler
+│   │   └── runner          # AdminUserSeeder (기동 시 최초 관리자 계정 시딩, idempotent)
 │   └── out
 │       ├── persistence   # JPA 엔티티/리포지토리/매퍼/영속성 어댑터
 │       ├── messaging      # KafkaProducerConfig/TopicConfig (Retry Topic 전용, Port 미구현)
@@ -34,11 +35,12 @@ com.fbrl
 │       ├── kubernetes       # KubernetesLeaderElectionAdapter
 │       ├── fraud             # RuleBasedFraudCheckAdapter
 │       ├── batch               # BatchJobExecutionHistoryAdapter
-│       └── serialization     # JacksonPayloadSerializerAdapter
+│       ├── serialization        # JacksonPayloadSerializerAdapter
+│       └── security              # AdminUserDetailsService, JwtTokenAdapter
 └── global
     ├── common.annotation   # @DistributedLock, @CheckIdempotency
     ├── common.aop            # DistributedLockAspect, AopForTransaction, IdempotencyAspect
-    └── config                 # RedissonConfig, ShedLockConfig, KubernetesApiClientConfig, LeaderElectionProperties
+    └── config                 # RedissonConfig, ShedLockConfig, ShedLockProperties, KubernetesApiClientConfig, LeaderElectionProperties, ApprovalConfig, ApprovalPolicyProperties, FraudConfig, FraudPolicyProperties, JwtProperties, CorsProperties, SecurityConfig, WebConfig, OpenApiConfig, BatchRepositoryConfig, AdminInitialCredentialsProperties
 ```
 
 의존 방향은 항상 바깥(`adapter`)에서 안쪽(`domain`)입니다. `application`은 `domain`에 의존하고, `adapter`는 `application.port`와 `domain`에 의존하지만 그 역방향 의존은 없습니다.
@@ -129,6 +131,8 @@ com.fbrl
 - `table.field.event.timestamp`는 사용하지 않음 — `created_at`이 `timestamptz`(Debezium 표현상 STRING)라 이 필드가 요구하는 INT64와 맞지 않아 커넥터가 즉시 실패하는 것을 직접 확인함. 대신 Debezium이 소스 커밋 시각을 자동으로 사용.
 - REPLICA IDENTITY는 별도 설정 없이 기본값(PK 기반)으로 충분 — Event Router는 INSERT만 라우팅하므로 UPDATE/DELETE의 이전 값이 필요 없음.
 - 커넥터 등록 후 실제 INSERT → `transfer-events` 토픽 수신까지 로컬에서 직접 검증 완료.
+
+> 이후 메인/데모 서버가 Redis·Kafka를 공유하는 조건에서 컨슈머 그룹/토픽명이 충돌할 수 있다는 조사에 따라(`chore/externalize-shedlock-kafka-namespace`, 커밋 `2cce76c`), 애플리케이션 쪽 토픽명(`KafkaTopicConfig`/`KafkaRetryTopicConfig`/`TransferEventConsumer`)은 `kafka.topic.transfer-events` 프로퍼티로 외부화됨. 다만 이 문단이 설명하는 Debezium 커넥터(`debezium/outbox-connector.json`)의 `route.topic.replacement`는 여전히 고정값 `transfer-events`라, 앱 쪽 값만 바꾸면 이벤트가 커넥터가 쏘는 옛 토픽과 컨슈머가 구독하는 새 토픽으로 갈라져 영구 미수신 상태가 될 수 있음 — 커넥터까지 함께 분리하는 작업은 아직 진행되지 않았음(자세한 내용은 `DEPLOYMENT.md`의 `KAFKA_TOPIC_TRANSFER_EVENTS` 항목 참고).
 
 ### 9. Outbox 해시체인 기반 불변 감사로그
 
