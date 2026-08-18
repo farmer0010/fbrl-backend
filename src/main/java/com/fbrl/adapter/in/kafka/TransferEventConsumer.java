@@ -30,7 +30,9 @@ public class TransferEventConsumer {
   private final Tracer tracer;
   private final Propagator propagator;
 
-  @KafkaListener(topics = "transfer-events", groupId = "transfer-event-processor")
+  @KafkaListener(
+      topics = "${kafka.topic.transfer-events:transfer-events}",
+      groupId = "${kafka.consumer.group-id:transfer-event-processor}")
   public void consume(
       @Payload String payload,
       @Header(value = "trace_id", required = false) String traceId,

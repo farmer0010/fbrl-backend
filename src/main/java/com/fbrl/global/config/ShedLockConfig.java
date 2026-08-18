@@ -12,10 +12,10 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EnableScheduling
 @EnableSchedulerLock(defaultLockAtMostFor = "10m")
 public class ShedLockConfig {
-  private static final String ENVIRONMENT = "fbrl-backend";
 
   @Bean
-  public LockProvider lockProvider(RedisConnectionFactory connectionFactory) {
-    return new RedisLockProvider(connectionFactory, ENVIRONMENT);
+  public LockProvider lockProvider(
+      RedisConnectionFactory connectionFactory, ShedLockProperties shedLockProperties) {
+    return new RedisLockProvider(connectionFactory, shedLockProperties.environment());
   }
 }
