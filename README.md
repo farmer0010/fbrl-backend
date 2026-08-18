@@ -113,7 +113,7 @@ graph TB
 | 4 | `GET /api/v1/accounts/{accountNumber}/eod-snapshots` | 계좌별 EOD 스냅샷 히스토리 | `from`/`to`(LocalDate, 선택) |
 | 5 | `GET /api/v1/eod-snapshots` | 날짜별 전체 계좌 EOD 스냅샷 | `date`(LocalDate, 필수) |
 | 6 | `GET /api/v1/batch-jobs/{jobName}/executions` | 배치 Job(`eodSettlementJob`/`reconciliationJob`) 실행 이력 | `jobName`(path) |
-| 6 | `GET /api/v1/audit/events` | Outbox 감사로그 이벤트 목록(단건 검증 `/verify`와는 별개) | 없음 |
+| 7 | `GET /api/v1/audit/events` | Outbox 감사로그 이벤트 목록(단건 검증 `/verify`와는 별개) | 없음 |
 
 ## 로컬 실행 방법
 

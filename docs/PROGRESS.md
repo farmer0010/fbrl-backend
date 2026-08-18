@@ -15,7 +15,7 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 
 - Java 17 / Spring Boot 4.0.7 / 헥사고날 아키텍처 (Ports & Adapters)
 - PostgreSQL 16 (wal_level=logical, Debezium CDC 기반)
-- Redisson, Redis / Spring Batch 6.0.4 · ShedLock · Kafka · Kubernetes Lease API (client-java 27.0.0) · Resilience4j
+- Redisson, Redis / Spring Batch 6.0.4 · ShedLock · Kafka · Kubernetes Lease API (client-java 27.0.0)
 
 ## ✅ 완료된 작업
 
