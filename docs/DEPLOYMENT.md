@@ -43,6 +43,9 @@ Spring Boot의 환경변수 relaxed binding은 `.`과 `-` 둘 다 단어 경계�
 | `K8S_LEADER_ELECTION_LEASE_DURATION_SECONDS` | `k8s.leader-election.lease-duration-seconds` | `15` | 필수 아님 | N/A(`enabled=false`면 미사용) | 상동 |
 | `K8S_LEADER_ELECTION_RENEW_DEADLINE_SECONDS` | `k8s.leader-election.renew-deadline-seconds` | `10` | 필수 아님 | N/A(`enabled=false`면 미사용) | 상동 |
 | `K8S_LEADER_ELECTION_RETRY_PERIOD_SECONDS` | `k8s.leader-election.retry-period-seconds` | `2` | 필수 아님 | N/A(`enabled=false`면 미사용) | 상동 |
+| `SHEDLOCK_ENVIRONMENT` | `shedlock.environment` | `fbrl-backend` | **같은 Redis를 공유하는 인스턴스가 둘 이상이면 필수**(예: 메인/데모) | silent | ShedLock 락 키(`job-lock:{environment}:{jobName}`)의 네임스페이스 세그먼트. 메인/데모 서버가 이 값을 다르게 가져가야 함 — 안 그러면 같은 Redis 위에서 두 서버가 같은 락 네임스페이스를 공유해, 한쪽의 EOD/Reconciliation 크론이 다른 쪽 크론 락을 선점해버려 스케줄이 조용히 스킵될 수 있음(로그에는 남지만 기동 실패는 아님) |
+| `KAFKA_CONSUMER_GROUP_ID` | `kafka.consumer.group-id` | `transfer-event-processor` | **같은 Kafka를 공유하는 인스턴스가 둘 이상이면 필수**(예: 메인/데모) | silent | `TransferEventConsumer`의 컨슈머 그룹. 메인/데모 서버가 이 값을 다르게 가져가야 함 — 안 그러면 Kafka가 두 서버를 같은 그룹의 컨슈머로 취급해 토픽 파티션을 나눠 배정하고, 어느 한쪽 이벤트를 다른 쪽 서버가 대신 소비하는 교차 소비가 발생할 수 있음. 다만 group-id만 분리해도 두 서버가 같은 토픽을 공유하는 한 서로의 이벤트를 각자 전부 받게 되므로(파티션이 갈리는 게 아니라 그룹 전체가 복제), 완전한 격리는 아래 `KAFKA_TOPIC_TRANSFER_EVENTS` 분리까지 필요 |
+| `KAFKA_TOPIC_TRANSFER_EVENTS` | `kafka.topic.transfer-events` | `transfer-events` | 필수 아님(아직 인프라 쪽 커넥터가 분리되지 않음) | **silent — 단, 이 값만 단독으로 바꾸면 오히려 위험**(아래 참고) | `KafkaTopicConfig`/`KafkaRetryTopicConfig`/`TransferEventConsumer`가 공유하는 기준 토픽명. **주의**: 이벤트를 실제로 이 토픽에 채워 넣는 건 `debezium/outbox-connector.json`(Kafka Connect에 등록된 Debezium 커넥터)이고, 이 커넥터의 `route.topic.replacement`는 아직 고정값 `transfer-events`다. 즉 이 앱 쪽 값만 예를 들어 `demo-transfer-events`로 바꾸면, 커넥터는 여전히 옛 토픽에 이벤트를 쏘는데 컨슈머는 새 토픽을 구독하게 되어 **이체 이벤트를 영구히 아무도 소비하지 못하는 상태가 조용히 발생**한다. 인프라 팀이 커넥터를 메인/데모용으로 분리 등록한 뒤, 그 커넥터의 `route.topic.replacement`와 이 값을 반드시 함께 맞춰서 바꿀 것 |
 
 ## 스키마 변경이 포함된 배포
 
@@ -81,4 +84,4 @@ Spring Boot의 환경변수 relaxed binding은 `.`과 `-` 둘 다 단어 경계�
 
 - **Redis/Kafka 인증 경로 부재** — `RedissonConfig`/`KafkaProducerConfig`에 password/SASL 설정 필드 자체가 없음. Azure Cache for Redis, Event Hubs(또는 Azure 상의 Kafka 호환 서비스) 등 실제 대상이 정해지면 인증 설정 코드를 추가해야 함.
 - **Kafka 재시도/DLT 토픽 replication factor=1** — 단일 장애점. 실제 브로커 구성(파티션/복제본 수)이 정해지면 그에 맞게 조정 필요.
-- **ShedLock 네임스페이스 하드코딩** — `ENVIRONMENT="fbrl-backend"`로 고정돼 있어, staging/prod가 같은 Redis를 공유하면 분산 락 키가 충돌할 수 있음. 환경별로 분리 필요.
+- **Kafka 토픽 자체 분리(main/demo)** — `debezium/outbox-connector.json` 하나뿐이고 `route.topic.replacement`가 `transfer-events` 고정값. 메인/데모가 각자 DB를 갖는 이상, 토픽까지 분리하려면 이 커넥터를 복제해 `database.dbname`/`slot.name`/`route.topic.replacement`를 각각 다르게 지정한 두 번째 커넥터를 Kafka Connect에 새로 등록해야 함(위 `KAFKA_TOPIC_TRANSFER_EVENTS` 행 참고 — 앱 쪽은 이미 외부화되어 이 작업만 남음). Redisson 계좌 락 키 관련해서도 데모 계좌번호에 `DEMO-` 같은 접두를 강제하는 채번 로직이 아직 없어, 같은 Redis를 공유하는 동안은 계좌 락 키가 우연히 겹치지 않는 수준에 머물러 있음 — 이 역시 별도 채번 작업으로 해소 예정.

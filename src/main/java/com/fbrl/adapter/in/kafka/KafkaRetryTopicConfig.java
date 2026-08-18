@@ -2,6 +2,7 @@ package com.fbrl.adapter.in.kafka;
 
 import com.fbrl.domain.exception.NonRetryableEventProcessingException;
 import java.time.Duration;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -16,13 +17,13 @@ public class KafkaRetryTopicConfig {
   private static final long MAX_INTERVAL_MS = Duration.ofSeconds(30).toMillis();
   private static final int RETRY_TOPIC_PARTITIONS = 3;
   private static final short RETRY_TOPIC_REPLICATION_FACTOR = 1;
-  private static final String TRANSFER_EVENTS_TOPIC = "transfer-events";
 
   @Bean
   public RetryTopicConfiguration transferEventsRetryTopic(
-      KafkaTemplate<String, String> kafkaTemplate) {
+      KafkaTemplate<String, String> kafkaTemplate,
+      @Value("${kafka.topic.transfer-events:transfer-events}") String transferEventsTopicName) {
     return RetryTopicConfigurationBuilder.newInstance()
-        .includeTopic(TRANSFER_EVENTS_TOPIC)
+        .includeTopic(transferEventsTopicName)
         .maxAttempts(MAX_ATTEMPTS)
         .exponentialBackoff(INITIAL_INTERVAL_MS, BACKOFF_MULTIPLIER, MAX_INTERVAL_MS)
         .notRetryOn(NonRetryableEventProcessingException.class)
