@@ -15,12 +15,27 @@ public class RedissonConfig {
   @Value("${spring.data.redis.port:6379}")
   private int port;
 
-  private static final String REDISSON_HOST_PREFIX = "redis://";
+  @Value("${spring.data.redis.password:}")
+  private String password;
+
+  @Value("${spring.data.redis.ssl.enabled:false}")
+  private boolean sslEnabled;
+
+  private static final String REDIS_PROTOCOL = "redis://";
+  private static final String REDISS_PROTOCOL = "rediss://";
 
   @Bean
   public RedissonClient redissonClient() {
+    return Redisson.create(buildConfig());
+  }
+
+  Config buildConfig() {
     Config config = new Config();
-    config.useSingleServer().setAddress(REDISSON_HOST_PREFIX + host + ":" + port);
-    return Redisson.create(config);
+    String protocol = sslEnabled ? REDISS_PROTOCOL : REDIS_PROTOCOL;
+    var serverConfig = config.useSingleServer().setAddress(protocol + host + ":" + port);
+    if (!password.isBlank()) {
+      serverConfig.setPassword(password);
+    }
+    return config;
   }
 }
