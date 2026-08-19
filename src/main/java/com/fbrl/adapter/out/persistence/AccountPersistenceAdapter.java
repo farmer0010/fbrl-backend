@@ -7,6 +7,7 @@ import com.fbrl.domain.exception.DuplicateAccountNumberException;
 import com.fbrl.domain.model.Account;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.context.annotation.Primary;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageRequest;
@@ -14,6 +15,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Component;
 
+@Primary
 @Component
 public class AccountPersistenceAdapter implements AccountRepositoryPort, LoadAllAccountsPort {
 
