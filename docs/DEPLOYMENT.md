@@ -24,6 +24,9 @@ Spring Boot의 환경변수 relaxed binding은 `.`과 `-` 둘 다 단어 경계�
 | `SPRING_DATASOURCE_URL` | `spring.datasource.url` | `jdbc:postgresql://localhost:5432/fbrl_db` | **필수** | loud | HikariCP가 기동 시 커넥션 풀 초기화 과정에서 실제 연결을 시도 — 실패하면 애플리케이션 컨텍스트 자체가 뜨지 않음 |
 | `SPRING_DATASOURCE_USERNAME` | `spring.datasource.username` | `fbrl_user` | **필수** | loud | 상동 |
 | `SPRING_DATASOURCE_PASSWORD` | `spring.datasource.password` | `fbrlpassword` | **필수** | loud | 로컬 기본값은 docker-compose 시드값과 동일한 더미 — 프로덕션에서 반드시 실제 값으로 교체. 안 바꾸면 인증 실패로 기동 자체가 안 됨(loud) |
+| `DEMO_DATASOURCE_URL` | `demo.datasource.url` | `jdbc:postgresql://localhost:5433/fbrl_demo_db` | **필수** | loud | 데모 랩 전용 2차 DataSource(`DemoDataSourceConfig`) — 운영 DB와 완전히 분리된 별도 Postgres. HikariCP가 기동 시 실제 연결을 시도하므로 실패하면 애플리케이션 컨텍스트 자체가 뜨지 않음(운영 DataSource와 동일한 실패 양상) |
+| `DEMO_DATASOURCE_USERNAME` | `demo.datasource.username` | `fbrl_user` | **필수** | loud | 상동 |
+| `DEMO_DATASOURCE_PASSWORD` | `demo.datasource.password` | `fbrlpassword` | **필수** | loud | 로컬 기본값은 docker-compose `postgres-demo` 서비스 시드값과 동일한 더미 — 프로덕션에서 반드시 실제 값으로 교체 |
 | `SPRING_JPA_HIBERNATE_DDL_AUTO` | `spring.jpa.hibernate.ddl-auto` | `validate`(2026-08-16 이번 변경으로 기본값 자체가 안전해짐) | 프로덕션 필수 아님 | (이번 수정 전) silent → (이번 수정 후) 안전 | 예전엔 기본값이 `update`라 안 건드려도 매 기동마다 조용히 스키마를 변경하는 것이 Critical 리스크였음. 기본값을 `validate`로 바꿔 프로덕션에서 이 값을 아예 신경 쓰지 않아도 스키마를 건드리지 않도록 함. **`update`로 절대 덮어쓰지 말 것**(마이그레이션 도구 도입 전까지) |
 | `SPRING_SQL_INIT_MODE` | `spring.sql.init.mode` | `never`(로컬 `test`/`bootRun` 태스크만 `always`로 오버라이드) | 프로덕션 필수 아님(`never` 유지) | **loud, 배포 담당자가 수동 DDL을 깜빡하면 기동 시점이 아니라 첫 배치 실행/첫 관리자 API 호출 시점에 드러남** | Spring Batch 스키마(`BATCH_*` 6개 테이블, `db/batch-schema-postgresql.sql`)를 앱이 기동 시점에 자동 적용하지 않도록 `never`로 고정(과제 29). 원래 `always`(매 기동 시 `CREATE TABLE IF NOT EXISTS` 재적용)였으나, **완전히 빈 DB에 여러 replica가 동시에 최초 기동하면 Postgres MVCC 특성상 경쟁 조건이 실재함을 `pgbench` 8개 동시 커넥션으로 재현(30/30 라운드 전부 `ERROR: duplicate key value violates unique constraint "pg_type_typname_nsp_index"`)** — `ddl-auto: update → validate` 전환(위 항목)과 같은 이유로 "앱이 기동 시점에 스키마를 건드리지 않는다"는 원칙을 여기도 적용해 `never`로 전환. **배포 전 아래 "스키마 변경이 포함된 배포" 절의 수동 DDL을 먼저 적용할 것** — 이 테이블은 JPA 엔티티가 아니라 `ddl-auto`/`validate`의 자동 검증 대상이 아니므로, 안 하면 기동 자체는 정상적으로 되고 배치 Job이 처음 실행되거나 관리자가 배치 이력 조회 API를 처음 호출하는 시점에야 `relation "batch_job_instance" does not exist`류 에러로 뒤늦게 드러남(JPA `validate`보다 늦고 조용한 실패 시점이라는 게 이 전환의 트레이드오프) |
 | `SPRING_DATA_REDIS_HOST` | `spring.data.redis.host` | `localhost` | **필수** | loud로 추정(미검증) | Redisson이 기동 시 실제 연결을 시도하는 것으로 일반적으로 알려져 있음. 이 코드베이스에서 직접 재현 검증한 것은 아님 |
@@ -51,7 +54,9 @@ Spring Boot의 환경변수 relaxed binding은 `.`과 `-` 둘 다 단어 경계�
 
 ## 스키마 변경이 포함된 배포
 
-이 프로젝트는 Flyway/Liquibase 같은 마이그레이션 도구를 쓰지 않고, `ddl-auto: validate` 기본값을 전제로 스키마는 배포 담당자가 수동으로 맞춰야 합니다(로컬 `test`/`bootRun` 태스크만 `ddl-auto=update`로 오버라이드되어 있어 로컬에서는 자동으로 맞춰지지만, 이 오버라이드는 프로덕션에는 적용되지 않습니다).
+이 프로젝트는 Flyway/Liquibase 같은 마이그레이션 도구를 쓰지 않고, `ddl-auto: validate` 기본값을 전제로 스키마는 배포 담당자가 수동으로 맞춰야 합니다(로컬 `test`/`bootRun` 태스크만 `ddl-auto=update`로 오버라이드되어 있어 로컬에서는 자동으로 맞춰지지만, 이 오버라이드는 프로덕션에는 적용되지 않습니다). `feat/demo-datasource-infrastructure`(운영/데모 DataSource 분리)부터는 이 원칙이 **운영 DB와 데모 DB 양쪽에 각각 독립적으로** 적용됩니다 — `MainDataSourceConfig`/`DemoDataSourceConfig`가 각자 별도의 `EntityManagerFactory`를 구성하고, `spring.jpa.hibernate.ddl-auto`(및 로컬 `test`/`bootRun` 태스크의 `update` 오버라이드)는 두 EntityManagerFactory 모두에 동일하게 적용되는 공유 설정이라, 로컬에서는 두 DB 모두 자동으로 맞춰지지만 프로덕션에서는 두 DB 모두 수동 DDL이 필요합니다.
+
+### 운영 DB
 
 - **`fix/decouple-approval-status-from-execution-result`(승인 상태와 집행 결과 분리)** — `transfer_approval_requests` 테이블에 컬럼 2개 추가 포함:
   - `execution_status VARCHAR(255) NOT NULL` — 기존 행이 있는 테이블에 `NOT NULL` 컬럼을 한 번에 추가하면 실패하므로, 배포 시 아래 순서로 적용할 것:
@@ -73,6 +78,21 @@ Spring Boot의 환경변수 relaxed binding은 `.`과 `-` 둘 다 단어 경계�
   ```
   이 파일은 전부 `CREATE TABLE IF NOT EXISTS`/`CREATE SEQUENCE IF NOT EXISTS`라 이미 적용된 환경에서 다시 실행해도 안전합니다(idempotent) — 여러 환경에 걸쳐 반복 적용해도 되고, 실수로 두 번 적용해도 무해합니다.
   - **이 DDL을 깜빡했을 때의 실패 시점 — 다른 스키마 변경과 다름**: 위 `execution_status` 컬럼 추가는 `ddl-auto: validate`가 즉시 잡아내 기동 자체가 loud하게 실패하지만, 이 테이블들은 JPA `@Entity`가 아니라서 `ddl-auto`/`validate` 검증 대상이 아닙니다. 앱은 정상 기동하고, **배치 Job이 처음 실행되거나 관리자가 `GET /api/v1/batch-jobs/{jobName}/executions`를 처음 호출하는 시점**에야 `relation "batch_job_instance" does not exist`(또는 유사한 SQL 에러)로 뒤늦게 드러납니다 — 배포 직후 반드시 이 엔드포인트를 한 번 호출해 확인할 것.
+
+### 데모 DB
+
+`feat/demo-datasource-infrastructure`부터 데모 DB(`DEMO_DATASOURCE_*`)에도 아래 두 가지가 운영 DB와 별개로 필요합니다. 운영 DB에 이미 적용했더라도 데모 DB는 물리적으로 다른 Postgres 인스턴스라 **반드시 별도로 적용**해야 합니다.
+
+- **`BATCH_*` 테이블 6개** — `DemoBatchRepositoryConfig`의 `demoJobRepository`가 데모 DB에 자체 JDBC 기반 `JobRepository`를 구성합니다(운영 `JobRepository`와 완전히 분리 — 크로스 DB 트랜잭션 원자성 문제를 피하기 위한 의도적 설계). 운영 DB와 동일하게 `src/main/resources/db/batch-schema-postgresql.sql`을 데모 DB에도 1회 적용할 것:
+  ```sql
+  -- docker exec -i <postgres-demo-container> psql -U <user> -d <db> < src/main/resources/db/batch-schema-postgresql.sql
+  ```
+  안 하면 앱은 정상 기동하지만(이 테이블들은 JPA 엔티티가 아니라 `ddl-auto`/`validate` 대상이 아님), 데모 Job이 처음 실행되는 시점에야 `relation "batch_job_instance" does not exist`로 뒤늦게 드러납니다 — 운영 DB 쪽과 동일한 실패 시점 트레이드오프.
+- **`accounts` 테이블** — `DemoAccountEntity`가 데모 DB의 `accounts` 테이블에 매핑됩니다(운영 `AccountEntity`와 컬럼 구조는 동일, 완전히 별도의 물리 테이블). 데모 DB는 운영 DB와 달리 이 테이블을 자동으로 물려받지 않으므로, 최초 배포 시 `src/main/resources/db/demo-schema-postgresql.sql`을 1회 적용할 것:
+  ```sql
+  -- docker exec -i <postgres-demo-container> psql -U <user> -d <db> < src/main/resources/db/demo-schema-postgresql.sql
+  ```
+  이 파일도 `CREATE TABLE IF NOT EXISTS`라 이미 적용된 환경에서 다시 실행해도 안전합니다(idempotent). 실제로 `SPRING_JPA_HIBERNATE_DDL_AUTO=validate`/`SPRING_SQL_INIT_MODE=never`(프로덕션과 동일 조건)로 이 DDL만 적용한 데모 DB에 기동해 `ddl-auto: validate` 통과를 확인했습니다. 안 하면 데모 `EntityManagerFactory` 초기화 시점에 스키마 불일치를 즉시 감지해 기동 자체가 실패합니다(loud) — 운영 DB의 JPA 엔티티 스키마 불일치와 동일한 실패 양상.
 
 ## 인증 실패 시 HTTP 상태 코드 (프론트엔드 참고)
 
