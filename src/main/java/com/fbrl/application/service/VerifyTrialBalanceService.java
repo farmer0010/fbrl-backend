@@ -5,9 +5,11 @@ import com.fbrl.application.port.out.LoadLedgerEntriesPort;
 import com.fbrl.domain.model.LedgerDirection;
 import com.fbrl.domain.model.Money;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+@Primary
 @Service
 @RequiredArgsConstructor
 public class VerifyTrialBalanceService implements VerifyTrialBalanceUseCase {

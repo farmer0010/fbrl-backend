@@ -120,3 +120,6 @@ demo:
       minimum-idle: 5
       idle-timeout: 300000
       connection-timeout: 20000
+  eod:
+    batch:
+      cron: "0 10 2 * * *"
