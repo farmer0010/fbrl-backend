@@ -2,6 +2,7 @@ package com.fbrl.adapter.in.web.demo;
 
 import com.fbrl.adapter.in.scheduler.DemoReconciliationScheduler;
 import com.fbrl.adapter.in.web.dto.ErrorResponse;
+import com.fbrl.application.port.out.DemoResetLockPort;
 import org.springframework.batch.core.job.Job;
 import org.springframework.batch.core.job.JobExecution;
 import org.springframework.batch.core.job.parameters.JobParameters;
@@ -20,16 +21,25 @@ public class DemoReconciliationTriggerController {
 
   private final JobOperator demoJobOperator;
   private final Job demoReconciliationJob;
+  private final DemoResetLockPort demoResetLockPort;
 
   public DemoReconciliationTriggerController(
       @Qualifier("demoJobOperator") JobOperator demoJobOperator,
-      @Qualifier("demoReconciliationJob") Job demoReconciliationJob) {
+      @Qualifier("demoReconciliationJob") Job demoReconciliationJob,
+      DemoResetLockPort demoResetLockPort) {
     this.demoJobOperator = demoJobOperator;
     this.demoReconciliationJob = demoReconciliationJob;
+    this.demoResetLockPort = demoResetLockPort;
   }
 
   @PostMapping("/trigger")
   public ResponseEntity<?> triggerReconciliation() {
+    if (demoResetLockPort.isLocked()) {
+      return ResponseEntity.status(HttpStatus.LOCKED)
+          .body(
+              ErrorResponse.of("DEMO_RESET_IN_PROGRESS", "데모 데이터 리셋이 진행 중이라 지금은 배치를 실행할 수 없습니다."));
+    }
+
     JobParameters jobParameters = DemoReconciliationScheduler.buildTodayJobParameters();
 
     try {
