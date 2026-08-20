@@ -103,7 +103,9 @@ graph TB
 
 ## 관리자 조회 API
 
-관리자 프론트엔드용 읽기 전용 조회 API 6종(엔드포인트 기준 7개)입니다. 전부 로그인(`POST /api/v1/auth/login`) 후 발급받은 JWT로 인증이 필요하며, 역할 구분 없이 단일 `ADMIN` 역할만 존재합니다. 페이지네이션은 공통으로 `page`(0-base)/`size` 쿼리 파라미터 + `{content, totalElements, page, size, totalPages}` 응답 형태를 씁니다.
+관리자 프론트엔드용 읽기 전용 조회 API 6종(엔드포인트 기준 7개)입니다. 전부 로그인(`POST /api/v1/auth/login`) 후 발급받은 JWT로 인증이 필요합니다. 페이지네이션은 공통으로 `page`(0-base)/`size` 쿼리 파라미터 + `{content, totalElements, page, size, totalPages}` 응답 형태를 씁니다.
+
+> 인증에는 `ADMIN`/`DEMO` 두 역할이 있습니다. 이 표의 엔드포인트는 전부 `ADMIN` 역할만 접근 가능합니다 — 역할별 접근 제어는 [데모 환경](#데모-환경) 섹션 참고.
 
 | # | 엔드포인트 | 설명 | 필터 파라미터 |
 |---|---|---|---|
@@ -114,6 +116,14 @@ graph TB
 | 5 | `GET /api/v1/eod-snapshots` | 날짜별 전체 계좌 EOD 스냅샷 | `date`(LocalDate, 필수) |
 | 6 | `GET /api/v1/batch-jobs/{jobName}/executions` | 배치 Job(`eodSettlementJob`/`reconciliationJob`) 실행 이력 | `jobName`(path) |
 | 7 | `GET /api/v1/audit/events` | Outbox 감사로그 이벤트 목록(단건 검증 `/verify`와는 별개) | 없음 |
+
+## 데모 환경
+
+공개 데모 프론트엔드가 계좌 개설/이체/승인/EOD/Reconciliation을 자유롭게 실행해볼 수 있도록, 운영 DB와 물리적으로 완전히 분리된 별도 DataSource·JobRepository·Redisson 락 네임스페이스(`DEMO-LOCK:`)로 구성된 데모 랩입니다. 모든 데모 엔드포인트는 `/api/v1/demo/**` 아래에 있고, `DEMO`/`ADMIN` 두 역할 모두 접근 가능하지만 그 외 운영 엔드포인트는 `ADMIN` 역할만 접근 가능합니다(`DEMO` 계정으로 운영 엔드포인트를 호출하면 403).
+
+- 계좌 개설(`POST /api/v1/demo/accounts`), 이체(`POST /api/v1/demo/transfers`), 승인 워크플로(`POST/GET /api/v1/demo/transfer-approvals/**`), EOD/Reconciliation 온디맨드 트리거(`POST /api/v1/demo/batch-jobs/{eod|reconciliation}/trigger`)는 운영 로직을 그대로 복제해 간소화하지 않았습니다.
+- 데이터는 주기적으로 초기화됩니다(`demo.reset.cron`, 기본 30분). 리셋 직후 `DEMO-AUDIT-DEMO`/`DEMO-AUDIT-COUNTERPARTY` 계좌가 시딩되고, Outbox 감사로그 3건 중 마지막 1건이 의도적으로 변조된 상태로 심어집니다 — 해시체인 위변조 탐지 기능을 바로 시연할 수 있도록 하기 위함입니다. `GET /api/v1/demo/reset-status`로 마지막/다음 리셋 시각을 확인할 수 있고, 리셋 진행 중에는 온디맨드 배치 트리거가 423을 반환합니다.
+- 데모 로그인 계정(`DEMO_ACCOUNT_USERNAME`/`PASSWORD`)은 데모 프론트엔드에 공개적으로 노출되는 것이 의도된 설계입니다 — `DEMO` 역할은 `/api/v1/demo/**` 밖에는 접근할 수 없어 노출돼도 보안 경계가 뚫리지 않습니다.
 
 ## 로컬 실행 방법
 

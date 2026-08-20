@@ -14,34 +14,39 @@
 ```
 com.fbrl
 ├── domain
-│   ├── model       # Account, Money, SystemAccounts, LedgerEntry, LedgerDirection, LedgerBalanceDelta, TransferSaga, SagaStatus, OutboxEvent, EodSnapshot, InterestPolicy, ReconciliationDiscrepancy, ReconciliationStatus, ApprovalPolicy, ApprovalStatus, TransferApprovalRequest, ExecutionStatus, FraudPolicy, AdminUser, AdminRole
+│   ├── model       # Account, Money, SystemAccounts, LedgerEntry, LedgerDirection, LedgerBalanceDelta, TransferSaga, SagaStatus, OutboxEvent, EodSnapshot, InterestPolicy, ReconciliationDiscrepancy, ReconciliationStatus, ApprovalPolicy, ApprovalStatus, TransferApprovalRequest, ExecutionStatus, FraudPolicy, AdminUser, AdminRole(ADMIN/DEMO)
 │   ├── exception    # 도메인 전용 예외 (프레임워크 예외 번역 대상)
 │   └── event        # TransferCompletedEvent
 ├── application
-│   ├── port.in       # UseCase 인터페이스 (CreateAccountUseCase, TransferMoneyUseCase, VerifyAuditChainUseCase, ...)
-│   ├── port.out       # Port 인터페이스 (AccountRepositoryPort, SaveOutboxEventPort, LoadAllOutboxEventsPort, ...)
-│   └── service        # UseCase 구현체 (CreateAccountService, TransferSagaOrchestrator, VerifyAuditChainService, ...)
+│   ├── port.in       # UseCase 인터페이스 (CreateAccountUseCase, TransferMoneyUseCase, VerifyAuditChainUseCase, DemoTransferMoneyUseCase, DemoApproveTransferUseCase, DemoRejectTransferUseCase, DemoRequestTransferApprovalUseCase, DemoGetApprovalRequestUseCase, ...)
+│   ├── port.out       # Port 인터페이스 (AccountRepositoryPort, SaveOutboxEventPort, LoadAllOutboxEventsPort, TokenPort, DemoDataWipePort, DemoBatchJobHistoryPort, DemoOutboxTamperPort, DemoResetLockPort, DemoResetStatusPort, ...)
+│   └── service        # UseCase 구현체 (CreateAccountService, TransferSagaOrchestrator, VerifyAuditChainService, DemoTransferMoneyService, DemoApproveTransferService, DemoAccountBalanceCalculator, DemoDataResetService, ...)
 ├── adapter
 │   ├── in
 │   │   ├── web         # AccountController, TransferMoneyController, TransferApprovalController, ReconciliationDiscrepancyController, EodSnapshotController, BatchJobExecutionController, AuthController, AuditController, JwtAuthenticationFilter, GlobalExceptionHandler
+│   │   │   └── demo    # DemoAccountController, DemoTransferController, DemoTransferApprovalController, DemoEodTriggerController, DemoReconciliationTriggerController, DemoResetStatusController — /api/v1/demo/** 전용, 운영 컨트롤러와 완전히 분리
 │   │   ├── kafka        # TransferEventConsumer, KafkaRetryTopicConfig
-│   │   ├── batch         # EodSettlementJobConfig, EodInfraCheckJobConfig, AccountItemReader, AccountInterestItemProcessor, EodSnapshotItemWriter, TrialBalanceVerificationTasklet, ReconciliationJobConfig, ReconciliationItemWriter
-│   │   ├── scheduler      # EodSettlementScheduler, ReconciliationScheduler
-│   │   └── runner          # AdminUserSeeder (기동 시 최초 관리자 계정 시딩, idempotent)
+│   │   ├── batch         # EodSettlementJobConfig, EodInfraCheckJobConfig, AccountItemReader, AccountInterestItemProcessor, EodSnapshotItemWriter, TrialBalanceVerificationTasklet, ReconciliationJobConfig, ReconciliationItemWriter, DemoEodSettlementJobConfig, DemoReconciliationJobConfig
+│   │   ├── scheduler      # EodSettlementScheduler, ReconciliationScheduler, DemoEodSettlementScheduler, DemoReconciliationScheduler, DemoDataResetScheduler
+│   │   └── runner          # AdminUserSeeder, DemoAccountSeeder (기동 시 계정 시딩, 둘 다 idempotent·상호 독립)
 │   └── out
-│       ├── persistence   # JPA 엔티티/리포지토리/매퍼/영속성 어댑터
+│       ├── persistence   # JPA 엔티티/리포지토리/매퍼/영속성 어댑터 (운영 DB)
+│       │   └── demo      # 데모 DB 전용 JPA 엔티티/리포지토리/매퍼/영속성 어댑터 — DemoAccountPersistenceAdapter, DemoLedgerEntryPersistenceAdapter, DemoOutboxPersistenceAdapter, DemoApprovalRequestPersistenceAdapter, DemoDataWipeAdapter, DemoBatchJobHistoryResetAdapter(@PersistenceContext(unitName="demo")), ... — 운영 어댑터와 동일 포트를 @Qualifier("demo")로 구현
 │       ├── messaging      # KafkaProducerConfig/TopicConfig (Retry Topic 전용, Port 미구현)
 │       ├── participant     # WithdrawalParticipantAdapter, DepositParticipantAdapter (Saga 참여자)
 │       ├── kubernetes       # KubernetesLeaderElectionAdapter
-│       ├── fraud             # RuleBasedFraudCheckAdapter
-│       ├── batch               # BatchJobExecutionHistoryAdapter
-│       ├── serialization        # JacksonPayloadSerializerAdapter
-│       └── security              # AdminUserDetailsService, JwtTokenAdapter
+│       ├── fraud             # RuleBasedFraudCheckAdapter (stateless — 운영/데모 공유)
+│       ├── lock                # ShedLockRedisStatusAdapter(ShedLock이 안 주는 락 보유 조회를 Redis 키 포맷 재구현), DemoResetStatusRedisAdapter
+│       ├── batch                # BatchJobExecutionHistoryAdapter
+│       ├── serialization         # JacksonPayloadSerializerAdapter (stateless — 운영/데모 공유)
+│       └── security               # AdminUserDetailsService, JwtTokenAdapter
 └── global
-    ├── common.annotation   # @DistributedLock, @CheckIdempotency
-    ├── common.aop            # DistributedLockAspect, AopForTransaction, IdempotencyAspect
-    └── config                 # RedissonConfig, ShedLockConfig, ShedLockProperties, KubernetesApiClientConfig, LeaderElectionProperties, ApprovalConfig, ApprovalPolicyProperties, FraudConfig, FraudPolicyProperties, JwtProperties, CorsProperties, SecurityConfig, WebConfig, OpenApiConfig, BatchRepositoryConfig, AdminInitialCredentialsProperties
+    ├── common.annotation   # @DistributedLock, @DemoDistributedLock(락 키 "DEMO-LOCK:" 접두사로 네임스페이스 분리), @CheckIdempotency
+    ├── common.aop            # DistributedLockAspect, AopForTransaction, DemoDistributedLockAspect, DemoAopForTransaction(demoTransactionManager 고정), IdempotencyAspect
+    └── config                 # RedissonConfig, ShedLockConfig, ShedLockProperties, KubernetesApiClientConfig, LeaderElectionProperties, ApprovalConfig, ApprovalPolicyProperties, FraudConfig, FraudPolicyProperties, JwtProperties, CorsProperties, SecurityConfig, WebConfig, OpenApiConfig, BatchRepositoryConfig, AdminInitialCredentialsProperties, MainDataSourceConfig, DemoDataSourceConfig, DemoBatchRepositoryConfig, DemoAccountCredentialsProperties
 ```
+
+> `adapter.out.persistence.demo`/`adapter.in.web.demo`/`adapter.in.batch`(Demo* Job)/`adapter.in.scheduler`(Demo* Scheduler)의 각 데모 컴포넌트는 운영 컴포넌트와 **동일한 Port를 `@Qualifier("demo")`로 재구현**하는 병렬 구조입니다 — 운영 코드를 수정하지 않고 완전히 격리된 데모 DataSource(`DemoDataSourceConfig`)/JobRepository(`DemoBatchRepositoryConfig`)/Redisson 락 네임스페이스(`DEMO-LOCK:`)로 동작합니다. 자세한 배경은 아래 결정 20~25번을 참고하세요.
 
 의존 방향은 항상 바깥(`adapter`)에서 안쪽(`domain`)입니다. `application`은 `domain`에 의존하고, `adapter`는 `application.port`와 `domain`에 의존하지만 그 역방향 의존은 없습니다.
 
@@ -263,6 +268,8 @@ com.fbrl
 
 **적용 범위**: 승인 요청 이력, Reconciliation 불일치 목록, 계좌별 원장, EOD 스냅샷, 배치 Job 이력, Outbox 이벤트 목록 등 신규 조회 API 전부 — 인증(로그인 여부)만 검사하고 인가(역할별 접근 제어)는 두지 않는다. 역할 세분화가 실제로 필요해지는 시점(예: 조회 전용 역할과 승인 가능 역할을 분리해야 하는 요구가 생길 때)이 오면 그때 `AdminRole`에 값을 추가하고 `SecurityConfig`에 경로별 `hasRole(...)` 분기를 넣는 것으로 확장한다(YAGNI).
 
+> **Amendment(결정 22번에서 뒤집힘)**: "역할 세분화가 필요해지는 시점"이 데모 환경 도입으로 실제로 도래해, `AdminRole.DEMO`가 추가되고 `SecurityConfig`에 경로별 `hasAnyRole`/`hasRole` 분기가 들어갔다. 이 문단이 서술하는 "역할 분기 없음"은 더 이상 사실이 아니다 — 자세한 내용은 결정 22번 참고.
+
 ### 17. 관리자 조회 API 공통 페이지네이션 — Page&lt;T&gt;는 어댑터 내부로 한정
 
 **결정 사항**: 관리자 조회 API 전체가 `application.port.out.PagedResult<T>(List<T> items, long totalElements)`(프레임워크 타입 없는 record)를 Port 반환 타입으로 쓰고, 컨트롤러는 이를 `adapter.in.web.dto.PageResponse<T>(content, totalElements, page, size, totalPages)`로 변환해 응답한다. Spring Data의 `Pageable`/`Page<T>`는 `adapter.out.persistence` 안에서만 쓰고 그 경계를 절대 넘기지 않는다.
@@ -296,6 +303,62 @@ com.fbrl
 **근거**: `TransferMoneyService.transfer()`의 `@DistributedLock(key = "#command.senderAccountNumber")`, EOD/Reconciliation Job의 청크 단위 쓰기 등 이 프로젝트의 쓰기 경로는 전부 특정 계좌/배치 실행 단위로 락을 잡거나 트랜잭션을 짧게 유지하는 설계인 반면, 이번 6종 API는 전부 `LoadXxxPort` 계열의 단순 페이지 조회이고 그 어떤 서비스 메서드도 락을 잡은 상태에서 이 Port들을 호출하지 않는다. 따라서 조회 트래픽이 늘어나도 이체 처리량이나 배치 실행 시간에 영향을 주지 않는다.
 
 **캐싱을 안 한 이유**: 관리자 화면 조회는 트래픽 규모가 작고(내부 관리자 전용, 다수 동시 사용자 없음), 최신성이 중요한 운영 데이터(승인 대기 현황, 배치 실행 상태 등)라 캐시 무효화 전략을 새로 설계하는 비용이 이득보다 큼. 필요해지면(예: 관리자 화면 응답 지연이 실제로 문제될 때) 그때 추가한다.
+
+### 20. 데모 환경 — 운영 DB와 물리적으로 분리된 듀얼 DataSource
+
+**문제 상황**: 공개 데모 프론트엔드가 계좌 개설/이체/EOD/Reconciliation을 자유롭게 실행하게 하려면, 운영 데이터에 어떤 영향도 주면 안 됨. `AbstractRoutingDataSource`로 런타임에 라우팅하는 방식은 "지금 이 요청이 데모인지 운영인지"를 스레드 로컬 등으로 계속 추적해야 해 실수로 잘못 라우팅될 위험이 있음.
+
+**대안 비교**: (a) 단일 DataSource + 테이블/스키마 접두사로 논리적 분리 — 실수로 조건절 하나 빠뜨리면 운영 데이터가 노출/오염됨. (b) `AbstractRoutingDataSource` 런타임 라우팅 — 위 위험. (c) `@Qualifier` 기반 정적 배선(두 번째 `DataSource`/`EntityManagerFactory`/`PlatformTransactionManager`를 명시적으로 별도 빈으로 등록, 데모 전용 어댑터 클래스가 컴파일 타임에 고정) — **채택**.
+
+**선택 이유**: (c)는 "이 코드가 운영 DB를 건드릴 수 있는가"를 컴파일 타임에 이미 알 수 있음(데모 어댑터는 애초에 운영 `EntityManagerFactory`에 접근할 방법이 없음) — 런타임 조건 분기가 없어 실수로 라우팅이 잘못될 여지 자체가 없음.
+
+**구현**: `MainDataSourceConfig`/`DemoDataSourceConfig`가 각각 독립된 `DataSource`/`EntityManagerFactory`(`persistenceUnit("main")`/`persistenceUnit("demo")`)/`PlatformTransactionManager`를 정의하고, `@EnableJpaRepositories(basePackages=..., entityManagerFactoryRef=..., transactionManagerRef=...)`로 리포지토리 스캔 대상 패키지 자체를 `adapter.out.persistence`/`adapter.out.persistence.demo`로 물리적으로 분리 — `PersistenceManagedTypesScanner`가 패키지 밖 엔티티를 잘못 줍는 것도 원천 차단됨. Spring Batch도 동일 원칙으로 `DemoBatchRepositoryConfig`가 데모 전용 `JobRepository`/`JobOperator`를 별도 빈으로 구성(운영 JobRepository와 완전 분리 — 크로스 DB 트랜잭션 원자성 문제 회피). 데모 스키마(`db/demo-schema-postgresql.sql`)는 운영과 동일한 컬럼 구조를 유지하되 물리적으로 별도 테이블/DB.
+
+### 21. 데모 이체/승인 — Redisson 락 인프라 전체 복제(Option C), 낙관적 락 재사용은 기각
+
+**문제 상황**: 데모 환경에도 이체/승인 동시성 제어가 필요한데, 운영 `TransferMoneyService`가 쓰는 `@DistributedLock`(Redisson) 인프라를 그대로 재사용할지, 더 가벼운 대안(`Account.@Version` 낙관적 락)으로 대체할지 결정이 필요했음.
+
+**대안 비교 — 사용자 검증 요청으로 뒤집힌 사례**: 최초 검토에서 "Option D"(낙관적 락 의존, 인프라 복제 없이 간소화)를 주 후보로 제안했으나, `TransferMoneyService.transfer()`가 이체 경로에서 `accountRepositoryPort.save()`를 **한 번도 호출하지 않는다**는 사실이 재확인 과정에서 드러남 — `Account.version`이 이체 경로에서 전혀 증가하지 않으므로 `@Version` 낙관적 락은 이 시나리오에서 동시 출금 경쟁을 전혀 막지 못함(간소화가 아니라 동시성 제어 자체가 빠지는 회귀). `LockComparisonService`(과제 1-2) 벤치마크도 실제 `Account`가 아닌 별도 `AccountLockAnchorJpaEntity`를 대상으로 하고, no-lock 베이스라인 자체가 프로젝트 역사상 측정된 적이 없다는 것도 함께 확인됨.
+
+**선택 이유**: **Option C(운영과 동일하게 Redisson 락 + REQUIRES_NEW 트랜잭션 인프라를 데모 전용으로 완전 복제)** 채택. 데모 락 키는 `"DEMO-LOCK:"` 접두사를 써서 운영 `"LOCK:"` 네임스페이스와 계좌번호가 우연히 겹쳐도 구조적으로 충돌하지 않게 함 — `RedissonClient` 인스턴스 자체는 키 네임스페이스만으로 이미 충돌이 불가능해 운영과 공유. `DemoAopForTransaction`은 `demoTransactionManager`를 명시 지정한 `REQUIRES_NEW`.
+
+**구현**: `DemoDistributedLockAspect`/`DemoAopForTransaction`(운영 `DistributedLockAspect`/`AopForTransaction`과 1:1 동형), `DemoTransferMoneyService`(로직은 운영과 완전히 동일 — 예약 계좌 검증/이상거래 판정/잔액 검증/LedgerEntry 쌍 저장/Outbox 이벤트 발행, 간소화하지 않음). `DemoTransferConcurrencyTest`가 잔액을 초과하는 100건 동시 요청 중 정확히 잔액만큼만 성공함을 실측 — Option D였다면 이 결과 자체가 성립하지 않았을 시나리오.
+
+### 22. DEMO 역할 도입 — 결정 16번을 뒤집고 경로별 인가 분기 도입, JWT 하드코딩 버그 동시 발견
+
+**문제 상황**: 데모 프론트엔드가 관리자 프론트엔드와 별도 로그인 계정을 쓰되, `/api/v1/demo/**`만 접근 가능하고 운영 엔드포인트는 접근 불가능해야 함 — 결정 16번의 "단일 ADMIN 역할" 전제가 깨짐.
+
+**사전 확인 중 발견한 버그**: `AdminUserDetailsService`(로그인 시점, `AuthenticationManager` 경유)는 `adminUser.getRole().name()`으로 실제 역할을 정확히 반환하고 있었지만, **`JwtAuthenticationFilter`(매 요청 인증 경로)는 토큰의 실제 역할과 무관하게 항상 `"ROLE_ADMIN"`을 하드코딩해서 부여**하고 있었다 — `JwtTokenAdapter.issueToken()`은 이미 처음부터 JWT에 `"role"` claim을 심고 있었는데 필터가 그걸 전혀 읽지 않았음. 역할이 `ADMIN` 하나뿐이던 시절엔 결과적으로 항상 맞는 값이었지만, `DEMO`를 추가하는 순간 DEMO 계정도 전부 `ROLE_ADMIN`을 받아 운영 엔드포인트 403이 성립하지 않는 상태였다. 이 배치의 "먼저 확인할 것" 절차가 정확히 이걸 잡아내기 위한 것이었음 — 결과가 나온 뒤에야 구현에 착수.
+
+**해결**: `TokenPort.extractRole(token)` 추가(자체적으로 JWT 서명 검증도 수행 — `validateToken()` 없이 단독 호출해도 위조 토큰의 role을 믿지 않음). `JwtAuthenticationFilter`는 `username`/`role`이 둘 다 유효할 때만 인증을 설정하도록 수정. `SecurityConfig`는 `/api/v1/demo/**`에 `hasAnyRole("DEMO","ADMIN")`, 그 외 `anyRequest()`에 `hasRole("ADMIN")`(기존 `anyRequest().authenticated()`에서 강화). `LoginResponse`/`LoginUseCase.LoginResult`에 `role` 필드를 추가해 프론트가 로그인 직후 DEMO/ADMIN을 구분할 수 있게 함.
+
+**부수 발견**: `admin_users.role` DB CHECK 제약이 `'ADMIN'` 하나만 허용하고 있어(`ddl-auto: validate`가 컬럼 존재는 검증하지만 CHECK 내용까지는 검증하지 않음) DEMO 계정 저장이 막히는 걸 확인 — 로컬 DB에 제약을 갱신하고 `DEPLOYMENT.md`에 배포용 DDL을 남김. `AdminUserPersistenceAdapter.save()`가 이 CHECK 위반을 `DuplicateAdminUsernameException`으로 오역하는 기존 버그도 함께 문서화(원인이 CHECK 제약이라는 걸 모르면 로그만 보고 오인하기 쉬움).
+
+### 23. 데모 계정 정보는 공개 노출이 의도된 설계 — `ADMIN_INITIAL_*`(silent-breach)와 반드시 구분
+
+**결정 사항**: `DEMO_ACCOUNT_USERNAME`/`DEMO_ACCOUNT_PASSWORD`는 데모 프론트엔드에 그대로 노출되는 것이 의도된 설계다. `ADMIN_INITIAL_USERNAME`/`PASSWORD`(silent-breach — 노출되면 관리자 계정이 뚫림)와 절대 같은 취급을 하면 안 된다.
+
+**근거**: `DemoAccountSeeder`가 생성하는 계정은 `role=DEMO`라 `/api/v1/demo/**` 밖 어떤 엔드포인트에도 `hasRole("ADMIN")`에 막혀 403으로 거부된다 — 이 계정이 노출돼도 뚫리는 보안 경계 자체가 없음. `AdminUserSeeder`와 동일한 idempotent 패턴(env var 둘 다 비어있으면 시딩 스킵, username 이미 존재하면 skip)이며, 두 시더는 서로 다른 username·설정 프리픽스를 써서 실행 순서와 무관하게 독립적으로 안전하다.
+
+### 24. 데모 데이터 리셋 — 단일 트랜잭션 + 사전 구성된 변조 시딩, 실시간 변조 API는 만들지 않음
+
+**문제 상황**: 공개 데모 프론트엔드가 오래 운영되면 데이터가 쌓이고 지저분해짐 — 주기적으로 초기 상태로 되돌리되, 해시체인 감사로그 기능을 시연하려면 "위변조가 실제로 탐지되는" 예시 데이터도 필요함.
+
+**대안 비교(변조 방식)**: (a) 방문자가 API로 실시간으로 감사로그를 변조하게 함 — 시연 임팩트는 크지만 프로덕션 코드에 "감사로그를 깨는 엔드포인트"가 영구히 남는 게 이 프로젝트의 감사로그 철학(결정 9번)과 정면으로 배치됨. (b) 리셋 트랜잭션 커밋 전에 정상 이벤트 몇 건을 체이닝한 뒤 마지막 1건만 사전에 변조해서 심어둠 — **채택**. 변조 실행 경로 자체가 프로덕션 코드에 남지 않고, 리셋 직후 항상 "정확히 예측 가능한 변조 지점 1개"가 존재.
+
+**구현**: `DemoDataResetService.reset()` 단일 `@Transactional("demoTransactionManager")` — 데모 6개 테이블 전체 삭제(`DemoDataWipePort`) → `BATCH_JOB_INSTANCE` 이하 6개 테이블을 데모 Job명 한정으로 삭제(`DemoBatchJobHistoryPort`, `@PersistenceContext(unitName="demo")` 네이티브 SQL — 이 프로젝트 최초의 EntityManager 직접 사용 사례, `BATCH_*`가 JPA 엔티티가 아니라서 Repository 기반 삭제가 불가능했기 때문) → `DEMO-AUDIT-DEMO`/`DEMO-AUDIT-COUNTERPARTY` 계좌+원장 시딩 → outbox_event 3건을 기존 `chainedWith()` 자동 체이닝으로 적재 → 마지막 1건만 `DemoOutboxTamperPort`(JPQL bulk UPDATE로 `payload`만 직접 변조, `entryHash`는 원본 payload 기준 그대로 남아 재계산 시 반드시 불일치) → Redis에 리셋 완료 시각 기록. `DemoDataResetScheduler`가 `@Scheduled` + `@SchedulerLock(name="demoDataReset")`으로 주기 실행(기본 30분).
+
+**락 조회 — ShedLock이 제공하지 않는 기능을 직접 재구현**: 온디맨드 배치 트리거(EOD/Reconciliation)가 리셋 진행 중엔 423을 반환해야 하는데, ShedLock은 "이 락이 지금 보유 중인가"를 조회하는 공개 API를 제공하지 않는다. `ShedLockRedisStatusAdapter`가 `RedisLockProvider`(shedlock-provider-redis-spring)의 실제 내부 키 포맷(`"job-lock:" + environment + ":" + lockName`, `InternalRedisLockProvider.DEFAULT_KEY_PREFIX`)을 그대로 재구현해 `StringRedisTemplate.hasKey()`로 조회 — 라이브러리 내부 구현 세부사항에 의존하는 결합이라, ShedLock 버전이 올라가며 키 포맷이 바뀌면 이 어댑터도 함께 깨질 수 있음(버전 업그레이드 시 재확인 필요).
+
+**동시성 검증**: 리셋 트랜잭션 진행 중 다른 스레드가 반복 조회해도 리셋 전 개수 또는 리셋 후 개수(2건)만 관측되고 중간 상태가 노출되지 않음을 실측(Postgres READ COMMITTED + 단일 트랜잭션 커밋이면 당연히 보장되는 성질이지만, "당연하다"에 의존하지 않고 직접 관측).
+
+### 25. TransferSagaOrchestrator — `sagaStateWriter.save()` 반환값 무시 버그 + REQUIRES_NEW 안에서 드러난 2차 버그
+
+**문제 상황**(인프라 팀 카오스 엔지니어링 검증 중 발견): `TransferSaga.id`/`version`이 `final`이라 최초 저장 후 실제 값은 `save()`의 반환값에만 있는데, `TransferSagaOrchestrator`가 6번의 `sagaStateWriter.save(saga)` 호출 전부 반환값을 버리고 원래 `saga` 변수를 계속 참조하고 있었다 — 두 번째 저장부터 `id=null`인 채로 INSERT를 시도해 `saga_id` 유니크 제약 위반이 나며 출금은 되고 입금/보상은 시도조차 안 된 채 크래시.
+
+**수정**: `ApproveTransferService`가 `saveApprovalRequestPort.save()` 반환값을 받아쓰는 것과 동일한 패턴으로 6곳 전부 `saga = sagaStateWriter.save(saga)`로 재할당. `saga`가 더 이상 effectively final이 아니게 되어, 람다(`traced()`)가 참조하던 필드 접근을 메서드 앞부분에서 한 번만 추출한 지역 `final` 변수로 교체.
+
+**실제 JPA 테스트로 드러난 2차 버그**: mock 없이 실제 JPA로 검증하라는 요구에 따라 통합 테스트를 작성하자, 1차 수정만으로는 세 번째 `save()`가 `ObjectOptimisticLockingFailureException`으로 새롭게 실패함을 발견 — `SagaStateWriter.save()`가 `@Transactional(REQUIRES_NEW)`라, `SagaPersistenceAdapter.save()`의 매핑 코드가 실제 flush(Hibernate가 버전 증가를 메모리에 반영하는 시점)보다 먼저 실행되어 반환된 도메인 객체의 `version`이 한 스텝 뒤처져 있었다. `transferSagaJpaRepository.save()` → `saveAndFlush()`로 교체해 해결(`ApproveTransferService`는 이런 `REQUIRES_NEW` 래퍼가 없어 repository 레벨 트랜잭션이 그 자리에서 바로 커밋되므로 이 문제 자체가 없었음 — 같은 "반환값 재할당" 패턴이라도 트랜잭션 경계 구조에 따라 충분하지 않을 수 있다는 사례).
 
 ---
 
