@@ -41,6 +41,7 @@ Spring Boot의 환경변수 relaxed binding은 `.`과 `-` 둘 다 단어 경계�
 | `APPROVAL_THRESHOLD` | `approval.threshold` | `10000000` | 필수 아님(업무 정책값) | N/A | Maker-Checker 승인이 필요해지는 금액 기준. 값이 틀려도 앱은 정상 동작, 업무 정책만 달라짐 |
 | `FRAUD_THRESHOLD` | `fraud.threshold` | `50000000` | 필수 아님(업무 정책값) | N/A | 이상거래 탐지 임계치. 상동 |
 | `EOD_BATCH_CRON` | `eod.batch.cron` | `"0 0 2 * * *"` | 필수 아님 | N/A | EOD 정산 배치 트리거 시각. 스테이징/프로덕션에서 다른 시각이 필요하면 이 값만 바꾸면 됨 |
+| `DEMO_EOD_BATCH_CRON` | `demo.eod.batch.cron` | `"0 10 2 * * *"` | 필수 아님 | N/A | 데모 EOD 정산 배치 트리거 시각. 운영(`02:00`)과 겹치지 않도록 기본값을 `02:10`으로 분리해뒀음 — 운영과 겹치게 바꿔도 기동 실패는 아니지만(별도 JobRepository/DataSource라 서로 락 경합도 없음) 로그 상에서 두 Job이 동시에 도는 게 헷갈릴 수 있어 권장하지 않음 |
 | `RECONCILIATION_BATCH_CRON` | `reconciliation.batch.cron` | `"0 0 3 * * *"` | 필수 아님 | N/A | 정산 대사 배치 트리거 시각. EOD 이후 시각으로 유지할 것 |
 | `K8S_LEADER_ELECTION_ENABLED` | `k8s.leader-election.enabled` | `false` | 필수 아님 | N/A | **Azure로 갈 경우 기본값 `false` 유지 권장** — K8s Lease API 기반 리더 선출은 실제 K8s 클러스터 환경(kind/AKS 등)이 전제. Azure 배포 대상이 확정되지 않은 현재는 건드리지 말 것 |
 | `K8S_LEADER_ELECTION_NAMESPACE` | `k8s.leader-election.namespace` | `default` | 필수 아님 | N/A(`enabled=false`면 미사용) | `ENABLED=true`로 켤 때만 의미 있음 |
@@ -88,11 +89,12 @@ Spring Boot의 환경변수 relaxed binding은 `.`과 `-` 둘 다 단어 경계�
   -- docker exec -i <postgres-demo-container> psql -U <user> -d <db> < src/main/resources/db/batch-schema-postgresql.sql
   ```
   안 하면 앱은 정상 기동하지만(이 테이블들은 JPA 엔티티가 아니라 `ddl-auto`/`validate` 대상이 아님), 데모 Job이 처음 실행되는 시점에야 `relation "batch_job_instance" does not exist`로 뒤늦게 드러납니다 — 운영 DB 쪽과 동일한 실패 시점 트레이드오프.
-- **`accounts` 테이블** — `DemoAccountEntity`가 데모 DB의 `accounts` 테이블에 매핑됩니다(운영 `AccountEntity`와 컬럼 구조는 동일, 완전히 별도의 물리 테이블). 데모 DB는 운영 DB와 달리 이 테이블을 자동으로 물려받지 않으므로, 최초 배포 시 `src/main/resources/db/demo-schema-postgresql.sql`을 1회 적용할 것:
+- **`accounts` / `ledger_entries` / `eod_snapshots` 테이블** — `DemoAccountEntity`/`DemoLedgerEntryEntity`/`DemoEodSnapshotEntity`가 데모 DB의 동명 테이블에 매핑됩니다(운영 엔티티와 컬럼 구조는 동일, 완전히 별도의 물리 테이블). `feat/demo-eod-ondemand-trigger`(데모 EOD Job)부터 `ledger_entries`/`eod_snapshots` 2개가 추가됐습니다. 데모 DB는 운영 DB와 달리 이 테이블들을 자동으로 물려받지 않으므로, 최초 배포 시 `src/main/resources/db/demo-schema-postgresql.sql`을 1회 적용할 것:
   ```sql
   -- docker exec -i <postgres-demo-container> psql -U <user> -d <db> < src/main/resources/db/demo-schema-postgresql.sql
   ```
-  이 파일도 `CREATE TABLE IF NOT EXISTS`라 이미 적용된 환경에서 다시 실행해도 안전합니다(idempotent). 실제로 `SPRING_JPA_HIBERNATE_DDL_AUTO=validate`/`SPRING_SQL_INIT_MODE=never`(프로덕션과 동일 조건)로 이 DDL만 적용한 데모 DB에 기동해 `ddl-auto: validate` 통과를 확인했습니다. 안 하면 데모 `EntityManagerFactory` 초기화 시점에 스키마 불일치를 즉시 감지해 기동 자체가 실패합니다(loud) — 운영 DB의 JPA 엔티티 스키마 불일치와 동일한 실패 양상.
+  이 파일도 `CREATE TABLE IF NOT EXISTS`라 이미 적용된 환경에서 다시 실행해도 안전합니다(idempotent). 안 하면 데모 `EntityManagerFactory` 초기화 시점에 스키마 불일치를 즉시 감지해 기동 자체가 실패합니다(loud) — 운영 DB의 JPA 엔티티 스키마 불일치와 동일한 실패 양상.
+  - **검증 시 주의**: `SPRING_JPA_HIBERNATE_DDL_AUTO=validate ./gradlew bootRun`처럼 셸에서 환경변수를 얹어 `bootRun`을 띄워도 검증되지 않습니다 — `build.gradle`의 `tasks.named('bootRun')`이 `SPRING_JPA_HIBERNATE_DDL_AUTO`/`SPRING_SQL_INIT_MODE`를 각각 `update`/`always`로 무조건 덮어써서, 셸에서 지정한 값이 조용히 무시됩니다(실제로 `SPRING_JPA_HIBERNATE_DDL_AUTO=존재하지않는값`을 줘도 에러 없이 기동되는 것으로 확인). 실제 `validate` 동작을 확인하려면 `./gradlew bootJar`로 만든 산출물을 `java -jar build/libs/*.jar`로 직접 실행해야 함 — 이 DDL은 그 방식으로 재현 검증했습니다.
 
 ## 인증 실패 시 HTTP 상태 코드 (프론트엔드 참고)
 
@@ -107,3 +109,4 @@ Spring Boot의 환경변수 relaxed binding은 `.`과 `-` 둘 다 단어 경계�
 - **Kafka 인증 경로 부재** — `KafkaProducerConfig`에 SASL 설정 필드 자체가 없음. Event Hubs(또는 Azure 상의 Kafka 호환 서비스) 등 실제 대상이 정해지면 인증 설정 코드를 추가해야 함. (Redis는 Azure Cache for Redis로 확정되어 `SPRING_DATA_REDIS_PASSWORD`/`SPRING_DATA_REDIS_SSL_ENABLED` 추가로 해소됨 — 위 표 참고)
 - **Kafka 재시도/DLT 토픽 replication factor=1** — 단일 장애점. 실제 브로커 구성(파티션/복제본 수)이 정해지면 그에 맞게 조정 필요.
 - **Kafka 토픽 자체 분리(main/demo)** — `debezium/outbox-connector.json` 하나뿐이고 `route.topic.replacement`가 `transfer-events` 고정값. 메인/데모가 각자 DB를 갖는 이상, 토픽까지 분리하려면 이 커넥터를 복제해 `database.dbname`/`slot.name`/`route.topic.replacement`를 각각 다르게 지정한 두 번째 커넥터를 Kafka Connect에 새로 등록해야 함(위 `KAFKA_TOPIC_TRANSFER_EVENTS` 행 참고 — 앱 쪽은 이미 외부화되어 이 작업만 남음). Redisson 계좌 락 키 관련해서도 데모 계좌번호에 `DEMO-` 같은 접두를 강제하는 채번 로직이 아직 없어, 같은 Redis를 공유하는 동안은 계좌 락 키가 우연히 겹치지 않는 수준에 머물러 있음 — 이 역시 별도 채번 작업으로 해소 예정.
+- **데모 전용 인가 격리 미비** — `POST /api/v1/demo/accounts`, `POST /api/v1/demo/batch-jobs/eod/trigger` 등 데모 전용 엔드포인트가 기존 `SecurityConfig`의 `anyRequest().authenticated()`만 그대로 적용받음. 단일 `ADMIN` 역할 체계라 "관리자면 데모/운영 구분 없이 전부 호출 가능"한 상태 — 데모 전용 역할·권한 분리는 아직 없음. 공개 배포용으로 안전한 상태가 아니므로, 데모 환경을 외부에 노출하기 전 역할 기반 인가(RBAC) 도입이 선행되어야 함.
