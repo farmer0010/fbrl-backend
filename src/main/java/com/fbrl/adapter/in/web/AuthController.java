@@ -23,6 +23,6 @@ public class AuthController {
   @PostMapping("/login")
   public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
     LoginUseCase.LoginResult result = loginUseCase.login(request.toCommand());
-    return ResponseEntity.ok(new LoginResponse(result.token()));
+    return ResponseEntity.ok(new LoginResponse(result.token(), result.role()));
   }
 }

@@ -9,6 +9,7 @@ import com.fbrl.application.port.in.LoginUseCase;
 import com.fbrl.application.port.in.LoginUseCase.LoginCommand;
 import com.fbrl.application.port.in.LoginUseCase.LoginResult;
 import com.fbrl.domain.exception.InvalidCredentialsException;
+import com.fbrl.domain.model.AdminRole;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -36,7 +37,7 @@ class AuthControllerTest {
   @DisplayName("아이디/비밀번호가 맞으면 토큰을 반환한다.")
   void login_success_returnsToken() throws Exception {
     given(loginUseCase.login(new LoginCommand("admin", "password123")))
-        .willReturn(new LoginResult("issued-jwt-token"));
+        .willReturn(new LoginResult("issued-jwt-token", AdminRole.ADMIN));
 
     mockMvc
         .perform(
@@ -44,7 +45,8 @@ class AuthControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"username\":\"admin\",\"password\":\"password123\"}"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.token").value("issued-jwt-token"));
+        .andExpect(jsonPath("$.token").value("issued-jwt-token"))
+        .andExpect(jsonPath("$.role").value("ADMIN"));
   }
 
   @Test

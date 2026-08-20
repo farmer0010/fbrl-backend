@@ -34,14 +34,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     if (header != null && header.startsWith(BEARER_PREFIX)) {
       String token = header.substring(BEARER_PREFIX.length());
       Optional<String> username = tokenPort.validateToken(token);
+      Optional<String> role = tokenPort.extractRole(token);
 
-      username.ifPresent(
-          value -> {
-            var authentication =
-                new UsernamePasswordAuthenticationToken(
-                    value, null, List.of(new SimpleGrantedAuthority("ROLE_ADMIN")));
-            SecurityContextHolder.getContext().setAuthentication(authentication);
-          });
+      if (username.isPresent() && role.isPresent()) {
+        var authentication =
+            new UsernamePasswordAuthenticationToken(
+                username.get(), null, List.of(new SimpleGrantedAuthority("ROLE_" + role.get())));
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+      }
     }
 
     filterChain.doFilter(request, response);
