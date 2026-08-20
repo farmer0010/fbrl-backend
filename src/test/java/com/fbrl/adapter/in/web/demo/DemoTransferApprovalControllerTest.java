@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.fbrl.adapter.in.web.dto.RejectTransferRequest;
 import com.fbrl.adapter.in.web.dto.RequestTransferApprovalRequest;
 import com.fbrl.adapter.out.persistence.AccountPersistenceAdapter;
 import com.fbrl.adapter.out.persistence.AdminUserPersistenceAdapter;
@@ -241,6 +242,49 @@ class DemoTransferApprovalControllerTest {
     assertThat(accountPersistenceAdapter.findByAccountNumber(SENDER)).isEmpty();
     assertThat(accountPersistenceAdapter.findByAccountNumber(RECEIVER)).isEmpty();
     assertThat(loadLedgerEntriesPort.loadByAccountNumberSince(SENDER, Instant.EPOCH)).isEmpty();
+  }
+
+  @Test
+  @DisplayName(
+      "기안자 본인의 로그인 세션으로 자신이 기안한 데모 요청을 거절하면 SelfApprovalNotAllowedException이 터져 400을 반환한다"
+          + "(도메인 로직 공유 확인).")
+  void rejectBySameLoginSession_isRejectedAsSelfApproval() throws Exception {
+    String requestId = requestApproval(makerToken, BigDecimal.valueOf(20_000_000));
+    RejectTransferRequest rejectBody = new RejectTransferRequest("한도 초과 우려");
+
+    mockMvc
+        .perform(
+            post(TRIGGER_URL + "/" + requestId + "/reject")
+                .header(HttpHeaders.AUTHORIZATION, bearer(makerToken))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(rejectBody)))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("SELF_APPROVAL_NOT_ALLOWED"));
+  }
+
+  @Test
+  @DisplayName(
+      "다른 관리자 계정으로 정상 거절하면 REJECTED 상태와 함께 rejectionReason이 저장되고 checkerId가 토큰 사용자명과 일치하며, "
+          + "운영 DB엔 전혀 남지 않는다.")
+  void rejectByDifferentAdmin_succeedsAndRecordsOnlyInDemoDatabase() throws Exception {
+    String requestId = requestApproval(makerToken, BigDecimal.valueOf(20_000_000));
+    RejectTransferRequest rejectBody = new RejectTransferRequest("한도 초과 우려");
+
+    mockMvc
+        .perform(
+            post(TRIGGER_URL + "/" + requestId + "/reject")
+                .header(HttpHeaders.AUTHORIZATION, bearer(checkerToken))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(rejectBody)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.status").value("REJECTED"));
+
+    TransferApprovalRequest persisted =
+        demoApprovalRequestPersistenceAdapter.loadByRequestId(requestId).orElseThrow();
+    assertThat(persisted.getCheckerId()).isEqualTo(CHECKER_USERNAME);
+    assertThat(persisted.getRejectionReason()).isEqualTo("한도 초과 우려");
+
+    assertThat(loadApprovalRequestPort.loadByRequestId(requestId)).isEmpty();
   }
 
   @Test
