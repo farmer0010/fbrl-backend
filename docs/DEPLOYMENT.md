@@ -43,6 +43,7 @@ Spring Boot의 환경변수 relaxed binding은 `.`과 `-` 둘 다 단어 경계�
 | `EOD_BATCH_CRON` | `eod.batch.cron` | `"0 0 2 * * *"` | 필수 아님 | N/A | EOD 정산 배치 트리거 시각. 스테이징/프로덕션에서 다른 시각이 필요하면 이 값만 바꾸면 됨 |
 | `DEMO_EOD_BATCH_CRON` | `demo.eod.batch.cron` | `"0 10 2 * * *"` | 필수 아님 | N/A | 데모 EOD 정산 배치 트리거 시각. 운영(`02:00`)과 겹치지 않도록 기본값을 `02:10`으로 분리해뒀음 — 운영과 겹치게 바꿔도 기동 실패는 아니지만(별도 JobRepository/DataSource라 서로 락 경합도 없음) 로그 상에서 두 Job이 동시에 도는 게 헷갈릴 수 있어 권장하지 않음 |
 | `RECONCILIATION_BATCH_CRON` | `reconciliation.batch.cron` | `"0 0 3 * * *"` | 필수 아님 | N/A | 정산 대사 배치 트리거 시각. EOD 이후 시각으로 유지할 것 |
+| `DEMO_RECONCILIATION_BATCH_CRON` | `demo.reconciliation.batch.cron` | `"0 20 3 * * *"` | 필수 아님 | N/A | 데모 정산 대사 배치 트리거 시각. 운영(`03:00`)과도, 데모 EOD(`02:10`)와도 겹치지 않도록 `03:20`으로 분리해뒀음 — 별도 JobRepository/DataSource라 겹쳐도 기동 실패나 락 경합은 없지만 로그가 헷갈릴 수 있어 권장하지 않음 |
 | `K8S_LEADER_ELECTION_ENABLED` | `k8s.leader-election.enabled` | `false` | 필수 아님 | N/A | **Azure로 갈 경우 기본값 `false` 유지 권장** — K8s Lease API 기반 리더 선출은 실제 K8s 클러스터 환경(kind/AKS 등)이 전제. Azure 배포 대상이 확정되지 않은 현재는 건드리지 말 것 |
 | `K8S_LEADER_ELECTION_NAMESPACE` | `k8s.leader-election.namespace` | `default` | 필수 아님 | N/A(`enabled=false`면 미사용) | `ENABLED=true`로 켤 때만 의미 있음 |
 | `K8S_LEADER_ELECTION_LEASE_NAME` | `k8s.leader-election.lease-name` | `eod-settlement-leader` | 필수 아님 | N/A(`enabled=false`면 미사용) | 상동 |
@@ -89,7 +90,7 @@ Spring Boot의 환경변수 relaxed binding은 `.`과 `-` 둘 다 단어 경계�
   -- docker exec -i <postgres-demo-container> psql -U <user> -d <db> < src/main/resources/db/batch-schema-postgresql.sql
   ```
   안 하면 앱은 정상 기동하지만(이 테이블들은 JPA 엔티티가 아니라 `ddl-auto`/`validate` 대상이 아님), 데모 Job이 처음 실행되는 시점에야 `relation "batch_job_instance" does not exist`로 뒤늦게 드러납니다 — 운영 DB 쪽과 동일한 실패 시점 트레이드오프.
-- **`accounts` / `ledger_entries` / `eod_snapshots` 테이블** — `DemoAccountEntity`/`DemoLedgerEntryEntity`/`DemoEodSnapshotEntity`가 데모 DB의 동명 테이블에 매핑됩니다(운영 엔티티와 컬럼 구조는 동일, 완전히 별도의 물리 테이블). `feat/demo-eod-ondemand-trigger`(데모 EOD Job)부터 `ledger_entries`/`eod_snapshots` 2개가 추가됐습니다. 데모 DB는 운영 DB와 달리 이 테이블들을 자동으로 물려받지 않으므로, 최초 배포 시 `src/main/resources/db/demo-schema-postgresql.sql`을 1회 적용할 것:
+- **`accounts` / `ledger_entries` / `eod_snapshots` / `reconciliation_discrepancies` 테이블** — `DemoAccountEntity`/`DemoLedgerEntryEntity`/`DemoEodSnapshotEntity`/`DemoReconciliationDiscrepancyEntity`가 데모 DB의 동명 테이블에 매핑됩니다(운영 엔티티와 컬럼 구조는 동일, 완전히 별도의 물리 테이블). `feat/demo-eod-ondemand-trigger`(데모 EOD Job)에서 `ledger_entries`/`eod_snapshots` 2개, `feat/demo-reconciliation-ondemand-trigger`(데모 Reconciliation Job)에서 `reconciliation_discrepancies`가 추가됐습니다. 데모 DB는 운영 DB와 달리 이 테이블들을 자동으로 물려받지 않으므로, 최초 배포 시 `src/main/resources/db/demo-schema-postgresql.sql`을 1회 적용할 것:
   ```sql
   -- docker exec -i <postgres-demo-container> psql -U <user> -d <db> < src/main/resources/db/demo-schema-postgresql.sql
   ```
