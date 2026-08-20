@@ -8,11 +8,13 @@ import com.fbrl.domain.model.ReconciliationDiscrepancy;
 import com.fbrl.domain.model.ReconciliationStatus;
 import java.time.LocalDate;
 import java.util.List;
+import org.springframework.context.annotation.Primary;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Component;
 
+@Primary
 @Component
 public class ReconciliationDiscrepancyPersistenceAdapter
     implements SaveReconciliationDiscrepancyPort, LoadReconciliationDiscrepancyPort {

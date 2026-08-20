@@ -123,3 +123,6 @@ demo:
   eod:
     batch:
       cron: "0 10 2 * * *"
+  reconciliation:
+    batch:
+      cron: "0 20 3 * * *"

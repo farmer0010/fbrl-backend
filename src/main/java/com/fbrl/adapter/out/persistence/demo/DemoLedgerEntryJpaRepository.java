@@ -21,4 +21,18 @@ interface DemoLedgerEntryJpaRepository extends JpaRepository<DemoLedgerEntryEnti
   @Query(
       "select coalesce(sum(l.amount), 0) from DemoLedgerEntryEntity l where l.direction = :direction")
   BigDecimal sumAmountByDirection(@Param("direction") LedgerDirection direction);
+
+  @Query(
+      "select new com.fbrl.adapter.out.persistence.demo.DemoLedgerBalanceDeltaProjection("
+          + "l.accountNumber, "
+          + "coalesce(sum(case when l.direction = :creditDirection then l.amount else 0 end), 0), "
+          + "coalesce(sum(case when l.direction = :debitDirection then l.amount else 0 end), 0)) "
+          + "from DemoLedgerEntryEntity l "
+          + "where l.accountNumber in :accountNumbers and l.occurredAt <= :until "
+          + "group by l.accountNumber")
+  List<DemoLedgerBalanceDeltaProjection> sumBalanceDeltasUntil(
+      @Param("accountNumbers") List<String> accountNumbers,
+      @Param("until") Instant until,
+      @Param("creditDirection") LedgerDirection creditDirection,
+      @Param("debitDirection") LedgerDirection debitDirection);
 }
