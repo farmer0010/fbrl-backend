@@ -16,7 +16,11 @@ public class AdminUser {
   }
 
   public static AdminUser create(String username, String passwordHash) {
-    return new AdminUser(null, username, passwordHash, AdminRole.ADMIN);
+    return create(username, passwordHash, AdminRole.ADMIN);
+  }
+
+  public static AdminUser create(String username, String passwordHash, AdminRole role) {
+    return new AdminUser(null, username, passwordHash, role);
   }
 
   public static AdminUser reconstruct(

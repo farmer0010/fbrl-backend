@@ -10,12 +10,14 @@ import com.fbrl.domain.model.TransferApprovalRequest;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.context.annotation.Primary;
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Component;
 
+@Primary
 @Component
 public class ApprovalPersistenceAdapter
     implements SaveApprovalRequestPort, LoadApprovalRequestPort {

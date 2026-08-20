@@ -51,6 +51,7 @@ class TransferSagaOrchestratorTest {
               return span;
             });
     given(tracer.withSpan(any())).willReturn(mock(Tracer.SpanInScope.class));
+    given(sagaStateWriter.save(any())).willAnswer(invocation -> invocation.getArgument(0));
   }
 
   @Test

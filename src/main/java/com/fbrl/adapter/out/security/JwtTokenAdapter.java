@@ -51,4 +51,20 @@ public class JwtTokenAdapter implements TokenPort {
       return Optional.empty();
     }
   }
+
+  @Override
+  public Optional<String> extractRole(String token) {
+    try {
+      String role =
+          Jwts.parser()
+              .verifyWith(signingKey)
+              .build()
+              .parseSignedClaims(token)
+              .getPayload()
+              .get("role", String.class);
+      return Optional.ofNullable(role);
+    } catch (JwtException | IllegalArgumentException e) {
+      return Optional.empty();
+    }
+  }
 }

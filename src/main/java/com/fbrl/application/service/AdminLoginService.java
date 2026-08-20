@@ -40,6 +40,6 @@ public class AdminLoginService implements LoginUseCase {
             .loadByUsername(command.username())
             .orElseThrow(InvalidCredentialsException::new);
 
-    return new LoginResult(tokenPort.issueToken(adminUser));
+    return new LoginResult(tokenPort.issueToken(adminUser), adminUser.getRole());
   }
 }

@@ -13,11 +13,13 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import org.springframework.context.annotation.Primary;
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Component;
 
+@Primary
 @Component
 public class LedgerEntryPersistenceAdapter
     implements SaveLedgerEntryPort, LoadLedgerEntriesPort, LoadLedgerBalanceDeltasPort {

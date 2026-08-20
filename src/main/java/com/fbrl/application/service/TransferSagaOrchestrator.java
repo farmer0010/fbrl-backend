@@ -5,6 +5,7 @@ import com.fbrl.application.port.out.DepositParticipantPort;
 import com.fbrl.application.port.out.DepositParticipantPort.DepositResult;
 import com.fbrl.application.port.out.WithdrawalParticipantPort;
 import com.fbrl.application.port.out.WithdrawalParticipantPort.WithdrawalResult;
+import com.fbrl.domain.model.Money;
 import com.fbrl.domain.model.TransferSaga;
 import io.micrometer.tracing.Span;
 import io.micrometer.tracing.Tracer;
@@ -29,53 +30,50 @@ public class TransferSagaOrchestrator implements StartTransferSagaUseCase {
     TransferSaga saga =
         TransferSaga.start(
             command.fromAccountNumber(), command.toAccountNumber(), command.amount());
-    sagaStateWriter.save(saga);
+    saga = sagaStateWriter.save(saga);
+
+    final String sagaId = saga.getSagaId();
+    final String fromAccountNumber = saga.getFromAccountNumber();
+    final String toAccountNumber = saga.getToAccountNumber();
+    final Money amount = saga.getAmount();
 
     WithdrawalResult withdrawalResult =
         traced(
             SPAN_WITHDRAWAL,
-            () ->
-                withdrawalParticipantPort.withdraw(
-                    saga.getSagaId(), saga.getFromAccountNumber(), saga.getAmount()));
+            () -> withdrawalParticipantPort.withdraw(sagaId, fromAccountNumber, amount));
 
     if (!withdrawalResult.success()) {
       saga.fail();
-      sagaStateWriter.save(saga);
+      saga = sagaStateWriter.save(saga);
       return new TransferSagaResult(saga.getSagaId(), saga.getStatus());
     }
 
     saga.completeWithdrawal();
-    sagaStateWriter.save(saga);
+    saga = sagaStateWriter.save(saga);
 
     DepositResult depositResult =
-        traced(
-            SPAN_DEPOSIT,
-            () ->
-                depositParticipantPort.deposit(
-                    saga.getSagaId(), saga.getToAccountNumber(), saga.getAmount()));
+        traced(SPAN_DEPOSIT, () -> depositParticipantPort.deposit(sagaId, toAccountNumber, amount));
 
     if (depositResult.success()) {
       saga.complete();
-      sagaStateWriter.save(saga);
+      saga = sagaStateWriter.save(saga);
       return new TransferSagaResult(saga.getSagaId(), saga.getStatus());
     }
 
     saga.startCompensation();
-    sagaStateWriter.save(saga);
+    saga = sagaStateWriter.save(saga);
 
     DepositResult compensationResult =
         traced(
             SPAN_COMPENSATION,
-            () ->
-                depositParticipantPort.deposit(
-                    saga.getSagaId(), saga.getFromAccountNumber(), saga.getAmount()));
+            () -> depositParticipantPort.deposit(sagaId, fromAccountNumber, amount));
 
     if (compensationResult.success()) {
       saga.completeCompensation();
     } else {
       saga.fail();
     }
-    sagaStateWriter.save(saga);
+    saga = sagaStateWriter.save(saga);
 
     return new TransferSagaResult(saga.getSagaId(), saga.getStatus());
   }

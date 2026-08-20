@@ -7,4 +7,6 @@ public interface TokenPort {
   String issueToken(AdminUser adminUser);
 
   Optional<String> validateToken(String token);
+
+  Optional<String> extractRole(String token);
 }
