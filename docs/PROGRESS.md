@@ -809,6 +809,74 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 
 **문서**: `ARCHITECTURE.md`에 JobRepository 실제 영속화 결정(18번)과 관리자 조회 API 6종이 배치 처리량/락 경합과 무관하다는 결정(19번)을 기록. `README.md`에 6종(엔드포인트 기준 7개) 전체 목록 표 추가.
 
+### 과제 30: Redisson Azure Cache for Redis 인증/TLS 지원 (완료)
+
+브랜치: `feat/redisson-auth-tls` → `develop` (PR #73)
+
+Azure Cache for Redis는 비밀번호 인증과 TLS가 기본 강제되는데 `RedissonConfig`에 해당 설정 필드가 없어 연결이 실패했다. 비밀번호/SSL 값이 비어있으면 기존 로컬 docker-compose Redis와 동일하게 동작하도록 설계해 로컬 무변경 호환성을 유지했다. `ShedLockConfig`가 쓰는 Boot 자동구성 `RedisConnectionFactory`도 동일하게 password/ssl을 반영하는지 별도 테스트로 검증.
+
+### 과제 31: 듀얼 DataSource + 듀얼 JobRepository 배관 구축 — 데모 랩 인프라 착수 (완료)
+
+브랜치: `feat/demo-datasource-infrastructure` → `develop` (PR #75)
+
+공개 데모 프론트엔드가 운영 데이터에 전혀 영향을 주지 않도록, 운영 DB는 기존 코드 그대로 두고 `adapter.out.persistence.demo` 패키지만 별도 `DataSource`/`EntityManagerFactory`/`TransactionManager`로 물리 격리했다. `AbstractRoutingDataSource`(런타임 조건 분기, 실수 위험)가 아니라 `@Qualifier` 정적 배선(컴파일 타임에 "이 코드가 운영 DB를 건드릴 수 있는가"가 이미 결정됨)을 채택. 배치 메타데이터도 크로스 DB 트랜잭션 원자성 문제를 피하려 운영/데모 `JobRepository`를 완전히 분리했다. `demoSmokeTestJob`으로 데모 `JobRepository`가 실제로 데모 DB의 `BATCH_*` 테이블에 읽고 쓰고 운영에는 영향이 없는지 검증. 후속 커밋에서 `demoSmokeTestStep`의 `demoTransactionManager` 명시 배선, `ddl-auto`가 `EntityManagerFactoryBuilder` 공유로 데모 EMF에도 동일 적용되는지, `ddl-auto: validate` + `sql.init.mode: never` 조합의 실제 기동까지 재확인하고 `db/demo-schema-postgresql.sql`을 신설(`DEPLOYMENT.md`가 서술 대신 이 파일을 가리키도록 갱신). 자세한 내용은 `ARCHITECTURE.md` 결정 20번 참고.
+
+### 과제 32: 데모 EOD 정산 Job + 온디맨드 트리거 (완료)
+
+브랜치: `feat/demo-eod-ondemand-trigger` → `develop` (PR #76)
+
+기존 `EodSettlementJobConfig`를 템플릿으로 `demoEodSettlementJob`을 구성 — Step은 `demoTransactionManager`로 명시 배선하고 Reader/Processor/Writer 전부 데모 전용 포트를 주입받는다. `AccountBalanceCalculator`/`VerifyTrialBalanceService`는 unqualified `@Transactional`이라 그대로 재사용하면 운영 트랜잭션 매니저가 딸려 들어가는 문제가 있어 `DemoAccountBalanceCalculator`/`DemoVerifyTrialBalanceService`를 별도로 신설해 데모 트랜잭션 매니저로 고정했다. 온디맨드 트리거(`POST /api/v1/demo/batch-jobs/eod/trigger`)는 크론과 동일한 `JobParameters` 생성 로직을 공유해 "당일 1회" 보호를 그대로 상속받고, `JobInstanceAlreadyCompleteException`은 409로 변환. `ddl-auto: validate` 검증 시 `bootRun` 태스크가 환경변수를 덮어써 검증이 안 되는 것을 확인하고 `java -jar` 직접 실행으로 재검증(과제 29 이전부터 반복되는 함정, `DEPLOYMENT.md`에 명시).
+
+### 과제 33: 데모 Reconciliation Job + 온디맨드 트리거 — EOD와 동일 템플릿 (완료)
+
+브랜치: `feat/demo-reconciliation-ondemand-trigger` → `develop` (PR #77)
+
+기존 `ReconciliationJobConfig`를 템플릿으로 `demoReconciliationJob` 구성, 과제 32와 동일한 패턴(Step `demoTransactionManager` 명시, 데모 전용 Reader/Writer). Reader는 "Job마다 별도 빈"이라는 기존 컨벤션을 따라 `demoAccountItemReader`를 재사용하지 않고 `demoReconciliationAccountItemReader`를 새로 만듦. `SaveReconciliationDiscrepancyPort`는 신규 `DemoReconciliationDiscrepancyPersistenceAdapter`가 필요했고, `@Primary` 없이 먼저 테스트를 돌려 운영 `ReconciliationJobConfigTest`가 `NoUniqueBeanDefinitionException`으로 실패하는 걸 실측한 뒤 운영 어댑터에 `@Primary`를 추가(이 세션에서 반복된 "먼저 실측, 그다음 수정" 검증 원칙 재확인). 데모 EOD를 안 돌리고 Reconciliation만 트리거하면 `NO_SNAPSHOT`이 자연스럽게 재현되는 것을 실제 curl로 확인.
+
+### 과제 34: 데모 이체 + 해시체인 감사로그 — Redisson 락 인프라 전체 복제(Option C) (완료)
+
+브랜치: `feat/demo-transfer-concurrency-and-audit-chain` → `develop` (PR #78)
+
+사전 조사에서 "Option D"(`Account.@Version` 낙관적 락 의존, 인프라 복제 없이 간소화)를 주 후보로 제안했으나, 사용자가 3가지 재검증을 요구해 확인한 결과 `TransferMoneyService.transfer()`가 이체 경로에서 `accountRepositoryPort.save()`를 한 번도 호출하지 않아 `@Version`이 발동할 여지가 없고(간소화가 아니라 동시성 제어 자체가 빠지는 회귀), `LockComparisonService`(과제 1-2) 벤치마크도 실제 `Account`가 아닌 별도 앵커 엔티티를 대상으로 하며, no-lock 베이스라인 측정 이력 자체가 없다는 것까지 확인 후 **Option C(운영과 동일하게 Redisson 락 + REQUIRES_NEW 트랜잭션 인프라를 데모 전용으로 완전 복제)**로 뒤집었다. `DemoDistributedLockAspect`는 락 키에 `"DEMO-LOCK:"` 접두사를 써서 운영 `"LOCK:"` 네임스페이스와 계좌번호가 겹쳐도 구조적으로 충돌하지 않게 했고, `RedissonClient`는 키 네임스페이스만으로 이미 분리되어 운영과 동일 인스턴스 재사용. `DemoTransferMoneyService`는 로직을 간소화하지 않고 운영과 완전히 동일(예약 계좌 검증/이상거래 판정/잔액 검증/LedgerEntry 쌍 저장/Outbox 발행) 구성. `outbox_chain_tail` 해시체인도 운영과 동일 구조로 데모 DB에 복제, `SaveOutboxEventPort` 구현체가 두 번째로 생기며 운영 `OutboxPersistenceAdapter`에 `@Primary` 추가. `DemoTransferConcurrencyTest`는 잔액을 초과하는 100건 동시 요청 중 정확히 잔액만큼(50건)만 성공함을 실측 — Option D였다면 성립하지 않았을 결과. 자세한 내용은 `ARCHITECTURE.md` 결정 21번 참고.
+
+### 과제 35: TransferSagaOrchestrator — `sagaStateWriter.save()` 반환값 무시 버그 수정 (완료)
+
+브랜치: `fix/saga-state-writer-return-value` → `develop` (PR #79)
+
+인프라 팀(김준희)이 카오스 엔지니어링 시나리오 검증 중 발견. `TransferSaga.id`/`version`이 `final`이라 최초 저장 후 실제 값은 `save()`의 반환값에만 있는데, `TransferSagaOrchestrator`의 6번의 `save()` 호출 전부 반환값을 버리고 원래 `saga` 변수를 계속 참조 — 두 번째 저장부터 `id=null`로 INSERT를 시도해 `saga_id` 유니크 제약 위반이 나며 출금은 되고 입금/보상은 시도조차 안 된 채 크래시. `ApproveTransferService`가 반환값을 받아쓰는 것과 동일한 패턴으로 `saga = sagaStateWriter.save(saga)` 재할당. 재할당으로 `saga`가 effectively final이 아니게 되어 람다가 참조하던 필드들을 메서드 앞부분에서 한 번만 추출한 지역 `final` 변수로 교체.
+
+**실제 JPA 테스트가 드러낸 2차 버그**: mock 없이 실제 JPA로 검증하라는 요구에 따라 통합 테스트를 짜자, 1차 수정만으로는 세 번째 `save()`가 `ObjectOptimisticLockingFailureException`으로 새롭게 실패 — `SagaStateWriter.save()`가 `@Transactional(REQUIRES_NEW)`라 `SagaPersistenceAdapter.save()`의 매핑 코드가 실제 flush(Hibernate가 버전 증가를 메모리에 반영하는 시점)보다 먼저 실행되어, 반환된 도메인 객체의 `version`이 DB 반영값보다 한 스텝 뒤처져 있었음. `transferSagaJpaRepository.save()` → `saveAndFlush()`로 교체해 해결(`ApproveTransferService`는 `REQUIRES_NEW` 래퍼가 없어 repository 레벨 트랜잭션이 그 자리에서 바로 커밋되므로 이 문제 자체가 없었음). `TransferSagaOrchestratorIntegrationTest` 작성 중 `@MockitoBean`으로 `Withdrawal/DepositParticipantPort`를 오버라이드하면 별도 `@SpringBootTest` 컨텍스트가 하나 더 생겨(컨텍스트마다 자체 HikariCP 풀) 전체 스위트를 한 번에 돌릴 때만 간헐적 커넥션 풀 고갈이 나는 것도 발견 — 실제 어댑터를 그대로 타도록 바꿔 기본 컨텍스트를 재사용하는 쪽으로 해결. 자세한 내용은 `ARCHITECTURE.md` 결정 25번 참고.
+
+### 과제 36: 데모 승인/거절/기안 워크플로 (완료)
+
+브랜치: `feat/demo-approval-workflow` → `develop` (PR #80)
+
+`ApproveTransferService`/`RejectTransferService`/`RequestTransferApprovalService`는 클래스 레벨 `@Transactional`/AOP가 없어 포트만 데모로 갈아끼워 그대로 복제. `DemoApproveTransferService`는 `request.approve()` 저장 → transfer 실행 → `markExecuted()`/`markExecutionFailed()` 흐름을 운영과 완전히 동일한 `TransferApprovalRequest` 도메인 메서드로 재사용(도메인 모델 공유, 자기승인 방지도 별도 구현 없이 자동 상속). `ApprovalPolicy`/`FraudCheckPort`는 stateless라 데모 버전 없이 운영 빈 공유. `DemoApprovalRequestEntity` 등은 운영 스키마와 컬럼 단위로 동일 구성, `SaveApprovalRequestPort`/`LoadApprovalRequestPort` 두 번째 구현체가 생기며 운영 `ApprovalPersistenceAdapter`에 `@Primary` 추가. `DemoTransferApprovalController`는 4개 엔드포인트(기안/승인/거절/단건조회)만 미러링(목록조회/이력검색은 스코프 제외). 테스트는 자기승인 방지(승인·거절 둘 다), 다른 계정 정상 승인·거절 시 실제 데모 이체 실행/사유 저장, 이상거래 임계치 이상 승인 시 `status=APPROVED` 유지 + `executionStatus=FAILED`(과제 23 로직 재사용 확인), 데모 결과가 운영 DB엔 전혀 없음, 인증 없이 401까지 실제 MockMvc+JPA로 검증.
+
+### 과제 37: DEMO 역할 도입 + 엔드포인트 분리, JWT 인가 하드코딩 버그 수정 (완료)
+
+브랜치: `feat/demo-role-authorization` → `develop` (PR #81)
+
+`AdminRole`에 `DEMO` 추가, `SecurityConfig`가 `/api/v1/demo/**`는 `hasAnyRole("DEMO","ADMIN")`, 그 외 `anyRequest()`는 `hasRole("ADMIN")`으로 강제하도록 재구성(기존 `anyRequest().authenticated()`에서 역할 체크로 강화 — 과제 27 결정을 뒤집음, `ARCHITECTURE.md` 결정 16번 amendment 참고).
+
+**사전 확인이 잡아낸 버그**: `AdminUserDetailsService`(로그인 시점)는 실제 역할을 정확히 반환하지만, `JwtAuthenticationFilter`(매 요청 인증 경로)는 토큰의 실제 역할과 무관하게 항상 `"ROLE_ADMIN"`을 하드코딩해서 부여하고 있었다. `JwtTokenAdapter.issueToken()`은 처음부터 JWT에 `"role"` claim을 심고 있었는데 필터가 전혀 읽지 않았던 것 — 역할이 `ADMIN` 하나뿐이던 시절엔 결과적으로 항상 맞았지만, `DEMO`를 추가하는 순간 DEMO 계정도 전부 `ROLE_ADMIN`을 받아 이 배치의 목적(운영 엔드포인트 403 차단) 자체가 성립하지 않는 상태였다. `TokenPort.extractRole(token)` 추가(자체 서명 검증 포함 — `validateToken()` 없이 단독 호출해도 위조 토큰을 안 믿음)로 해결.
+
+`DemoAccountSeeder`는 `AdminUserSeeder`와 동일한 idempotent 패턴(env var 둘 다 비어있으면 스킵, username 이미 존재하면 스킵)으로 복제, 서로 다른 username·설정 프리픽스라 두 `ApplicationRunner`는 실행 순서 무관하게 독립적. `LoginResponse`/`LoginUseCase.LoginResult`에 `role` 필드 추가.
+
+**부수 발견**: `admin_users.role` DB CHECK 제약이 여전히 `'ADMIN'` 하나만 허용(`ddl-auto: validate`가 컬럼 존재만 검증하고 CHECK 내용은 검증 안 함)해 DEMO 계정 저장이 `DataIntegrityViolationException`으로 막히는 것을 발견 — 로컬 DB 제약 갱신, `DEPLOYMENT.md`에 배포용 DDL 추가. `AdminUserPersistenceAdapter.save()`가 이 CHECK 위반을 `DuplicateAdminUsernameException`으로 오역하는 기존 버그도 함께 문서화. `DEMO_ACCOUNT_USERNAME`/`PASSWORD`는 공개 노출이 의도된 설계임을 `ADMIN_INITIAL_*`(silent-breach)와 구분해 명시(`ARCHITECTURE.md` 결정 23번).
+
+### 과제 38: 데모 데이터 리셋(DemoDataResetService) + 온디맨드 배치 423 락 체크 (완료)
+
+브랜치: `feat/demo-data-reset` → `develop` (PR #82)
+
+`DemoDataResetService.reset()` 단일 `@Transactional("demoTransactionManager")`로: 데모 6개 테이블 전체 삭제 → `BATCH_JOB_INSTANCE` 이하 6개 테이블을 `demoEodSettlementJob`/`demoReconciliationJob` job명 한정으로 FK 역순 삭제 → `DEMO-AUDIT-DEMO`/`DEMO-AUDIT-COUNTERPARTY` 계좌+원장 시딩 → outbox_event 3건을 기존 `chainedWith()` 자동 체이닝으로 적재 → 마지막 1건만 JPQL bulk UPDATE로 payload 직접 변조(entryHash는 원본 payload 기준 그대로 남아 재계산 시 불일치) → Redis에 리셋 완료 시각 기록. 변조는 방문자가 실시간으로 트리거하는 API가 아니라 리셋 시퀀스 안에 사전 구성으로만 존재 — 프로덕션 코드에 "감사로그를 깨는 엔드포인트"를 남기지 않기 위함(`ARCHITECTURE.md` 결정 24번).
+
+헥사고날 경계를 지키려 포트 5개 신설: `DemoDataWipePort`(6개 데모 어댑터의 `deleteAllInBatch`를 오케스트레이션), `DemoBatchJobHistoryPort`(`BATCH_*`가 JPA 엔티티가 아니라 `@PersistenceContext(unitName="demo")` 네이티브 SQL 필요 — 이 프로젝트 최초의 EntityManager 직접 사용), `DemoOutboxTamperPort`, `DemoResetLockPort`/`DemoResetStatusPort`(Redis 기반, 신규 `adapter.out.lock` 패키지). `DemoResetLockPort`는 ShedLock이 락 보유 여부 조회 공개 API를 제공하지 않아 `RedisLockProvider`의 실제 내부 키 포맷(`"job-lock:" + environment + ":" + lockName`)을 직접 재구현.
+
+`DemoDataResetScheduler`는 `@Scheduled(cron="${demo.reset.cron:0 */30 * * * *}")` + `@SchedulerLock(name="demoDataReset")`. Demo EOD/Reconciliation 트리거 컨트롤러 둘 다 `jobOperator.start()` 호출 전 락 보유 여부를 확인해 보유 중이면 423 반환. `GET /api/v1/demo/reset-status`는 Redis에 기록된 마지막 리셋 시각과 `CronExpression.parse(cron).next(now)`로 계산한 다음 리셋 예정 시각을 반환.
+
+동시성 테스트로 리셋 트랜잭션 진행 중 반복 조회해도 리셋 전/후 개수만 관측되고 중간값이 노출되지 않음을 실측(Postgres READ COMMITTED + 단일 트랜잭션이면 당연히 보장되는 성질이지만 직접 관측). 변조 판정 테스트는 outbox_event 3건 중 앞 2건은 `entryHash == recomputeEntryHash()`, 마지막 1건만 불일치함을 확인. 배치 메타데이터 테스트는 EOD 트리거를 당일 2회 호출해 409를 재현한 뒤 `reset()`을 호출하고 3번째 호출이 다시 200으로 성공함을 확인해 "데모 Job 한정 삭제"가 실제로 동작함을 증명.
+
 ## 🚧 다음 작업
 
 - (보류) 승인은 됐으나 집행(실제 이체) 실패한 건의 재시도 정책 — 과제 23에서 `TransferApprovalRequest.executionStatus`(NOT_APPLICABLE/EXECUTED/FAILED)로 "승인 행위"와 "집행 결과"를 분리했지만, `executionStatus=FAILED`로 남은 건을 재시도시킬 API/운영 절차는 이번 스코프에서 의도적으로 제외(YAGNI). 재시도 API 필요 시: 같은 요청을 다시 집행할지, 아니면 신규 승인 요청을 처음부터 다시 만들게 할지부터 결정 필요.
@@ -876,6 +944,10 @@ Chaos Mesh 결함 주입은 노션 "프로젝트 개요" 문서에 인프라(김
 - JPQL에서 `:param is null or column = :param` 패턴으로 nullable 필터를 구현할 때, `@Query`의 `countQuery`는 항상 명시적으로 같이 작성할 것(과제 27) — Spring Data의 자동 count 쿼리 유도가 조건절이 복잡해질수록 실패하거나 성능이 나빠질 수 있음. 또한 파라미터 타입에 따라 이 패턴 자체가 Postgres에서 깨질 수 있음: `LocalDate`처럼 `IS NULL` 단독 위치에서 타입을 추론할 문맥이 없는 파라미터는 `could not determine data type of parameter` 오류가 나므로 `cast(:param as date)`를 명시해야 함 — 반면 `@Enumerated(STRING)` enum은 같은 패턴이 캐스트 없이도 통과함(과제 28)
 - Spring Batch 6.0부터 `org.springframework.batch.core.repository.explore.JobExplorer`는 `@Deprecated(forRemoval = true)`(6.2+ 제거 예정) — 읽기 기능은 전부 `org.springframework.batch.core.repository.JobRepository`가 흡수(`JobRepository extends JobExplorer`). 배치 Job 이력을 다루는 신규 코드는 `JobExplorer`가 아니라 `JobRepository`를 참조할 것(과제 29에서 `BatchJobExecutionHistoryAdapter`에 적용)
 - Spring Boot 4.0의 `spring-boot-batch` 모듈은 기본적으로 `JobRepository`를 **인메모리 전용**(`ResourcelessJobRepository`)으로 구성한다(`BatchAutoConfiguration` 클래스 javadoc에 명시). `spring.batch.jdbc.initialize-schema` 프로퍼티는 이 버전에서 대응하는 스키마 초기화 빈이 없어 아무 효과가 없음 — 실제로 Postgres에 영속화하려면 `DefaultBatchConfiguration`을 상속한 자체 `@Configuration`에서 `jobRepository()` 빈을 `JdbcJobRepositoryFactoryBean`으로 오버라이드하고, Spring Batch 공식 스키마(`schema-postgresql.sql`, spring-batch-core jar 내장)를 직접 적용해야 함(과제 29, `BatchRepositoryConfig`). `ResourcelessJobRepository`는 필드 하나에 최근 실행 1건만 기억해 `JobInstanceAlreadyCompleteException` 기반 재실행 방지도 앱 재시작 시 무력화됨 — EOD/Reconciliation Job처럼 이미 이 저장소를 쓰던 기존 Job에도 해당되는 잠재 버그였음(과제 29에서 함께 해결)
+- **로그인 시점 인증(`UserDetailsService`)과 매 요청 인증(JWT 필터) 경로는 서로 다른 코드라 역할/권한 로직이 양쪽에 각각 존재할 수 있음** — 한쪽만 고치고 다른 쪽을 놓치기 쉬운 함정. 이 프로젝트는 `AdminUserDetailsService`(로그인 시점, `SimpleGrantedAuthority("ROLE_" + role.name())`로 실제 역할 반영)는 처음부터 정확했지만, `JwtAuthenticationFilter`(매 요청, 과제 37 이전까지)는 항상 `"ROLE_ADMIN"`을 하드코딩하고 있었음 — 역할이 하나뿐이던 동안은 우연히 항상 맞아서 드러나지 않았다. 역할을 2종 이상으로 늘리는 작업을 할 때는 반드시 "인증이 발생하는 모든 지점"을 grep해서 하드코딩된 권한 문자열이 없는지 전수 확인할 것(과제 37)
+- ShedLock은 "이 락이 지금 보유 중인가"를 조회하는 공개 API를 제공하지 않음 — 필요하면 `shedlock-provider-redis-spring`의 내부 키 포맷(`InternalRedisLockProvider.buildKey()` = `keyPrefix(기본 "job-lock") + ":" + environment + ":" + lockName`)을 직접 재구현해 `StringRedisTemplate.hasKey()`로 조회해야 함(과제 38, `ShedLockRedisStatusAdapter`) — 라이브러리 내부 구현 세부사항 의존이라 ShedLock 버전을 올릴 때는 이 키 포맷이 안 바뀌었는지 재확인 필요
+- Spring Batch의 `BATCH_*` 테이블은 JPA `@Entity`가 아닌 순수 JDBC 테이블이라, 특정 Job명 한정으로 이력을 삭제하는 등 Repository로 표현 불가능한 작업은 네이티브 SQL이 필요함 — `@PersistenceContext(unitName = "...")`로 얻은 `EntityManager`의 `createNativeQuery()`는 같은 트랜잭션(같은 `PlatformTransactionManager`)에 자연스럽게 참여하므로, 별도 `DataSource`로 `JdbcTemplate`을 새로 만드는 것(트랜잭션이 분리되어 원자성이 깨짐)보다 안전함(과제 38, `DemoBatchJobHistoryResetAdapter`)
+- `@SpringBootTest` + `@MockitoBean`으로 특정 Port를 오버라이드하면, 그 오버라이드 조합이 기존 어떤 테스트 클래스와도 다르면 Spring이 완전히 새로운 ApplicationContext를 띄운다 — 컨텍스트마다 각자 HikariCP 커넥션 풀(운영+데모 두 DataSource 몫)을 새로 열기 때문에, 이미 서로 다른 오버라이드 조합의 컨텍스트가 여러 개 쌓인 상태에서 하나를 더 추가하면 전체 테스트 스위트를 한 번에 돌릴 때만(단독 실행은 항상 통과) 무관한 다른 테스트가 커넥션 풀 고갈로 간헐적으로 실패할 수 있음 — 가능하면 실제 어댑터를 그대로 쓰거나 이미 존재하는 오버라이드 조합을 재사용해 컨텍스트 캐시를 늘리지 말 것(과제 35)
 
 ---
 
