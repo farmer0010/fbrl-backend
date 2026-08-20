@@ -24,7 +24,7 @@ public class SagaPersistenceAdapter implements SaveSagaPort {
   public TransferSaga save(TransferSaga saga) {
     try {
       TransferSagaJpaEntity entity = sagaMapper.toEntity(saga);
-      TransferSagaJpaEntity savedEntity = transferSagaJpaRepository.save(entity);
+      TransferSagaJpaEntity savedEntity = transferSagaJpaRepository.saveAndFlush(entity);
       return sagaMapper.toDomain(savedEntity);
     } catch (ObjectOptimisticLockingFailureException e) {
       throw new ConcurrentSagaModificationException(
