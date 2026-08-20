@@ -2,6 +2,7 @@ package com.fbrl.adapter.in.web.demo;
 
 import com.fbrl.adapter.in.scheduler.DemoEodSettlementScheduler;
 import com.fbrl.adapter.in.web.dto.ErrorResponse;
+import com.fbrl.application.port.out.DemoResetLockPort;
 import org.springframework.batch.core.job.Job;
 import org.springframework.batch.core.job.JobExecution;
 import org.springframework.batch.core.job.parameters.JobParameters;
@@ -20,16 +21,25 @@ public class DemoEodTriggerController {
 
   private final JobOperator demoJobOperator;
   private final Job demoEodSettlementJob;
+  private final DemoResetLockPort demoResetLockPort;
 
   public DemoEodTriggerController(
       @Qualifier("demoJobOperator") JobOperator demoJobOperator,
-      @Qualifier("demoEodSettlementJob") Job demoEodSettlementJob) {
+      @Qualifier("demoEodSettlementJob") Job demoEodSettlementJob,
+      DemoResetLockPort demoResetLockPort) {
     this.demoJobOperator = demoJobOperator;
     this.demoEodSettlementJob = demoEodSettlementJob;
+    this.demoResetLockPort = demoResetLockPort;
   }
 
   @PostMapping("/trigger")
   public ResponseEntity<?> triggerEodSettlement() {
+    if (demoResetLockPort.isLocked()) {
+      return ResponseEntity.status(HttpStatus.LOCKED)
+          .body(
+              ErrorResponse.of("DEMO_RESET_IN_PROGRESS", "데모 데이터 리셋이 진행 중이라 지금은 배치를 실행할 수 없습니다."));
+    }
+
     JobParameters jobParameters = DemoEodSettlementScheduler.buildTodayJobParameters();
 
     try {

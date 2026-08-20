@@ -1,5 +1,6 @@
 package com.fbrl.adapter.out.persistence.demo;
 
+import com.fbrl.application.port.out.DemoOutboxTamperPort;
 import com.fbrl.application.port.out.LoadAllOutboxEventsPort;
 import com.fbrl.application.port.out.LoadOutboxEventsPort;
 import com.fbrl.application.port.out.PagedResult;
@@ -16,7 +17,10 @@ import org.springframework.stereotype.Component;
 @Component
 @Qualifier("demo")
 public class DemoOutboxPersistenceAdapter
-    implements SaveOutboxEventPort, LoadAllOutboxEventsPort, LoadOutboxEventsPort {
+    implements SaveOutboxEventPort,
+        LoadAllOutboxEventsPort,
+        LoadOutboxEventsPort,
+        DemoOutboxTamperPort {
   private static final String SPAN_NAME = "demo.outbox.save";
 
   private final DemoOutboxEventJpaRepository demoOutboxEventJpaRepository;
@@ -84,5 +88,10 @@ public class DemoOutboxPersistenceAdapter
   public void deleteAllInBatch() {
     demoOutboxEventJpaRepository.deleteAllInBatch();
     demoOutboxChainTailJpaRepository.deleteAllInBatch();
+  }
+
+  @Override
+  public void tamperPayload(Long outboxEventId, String corruptedPayload) {
+    demoOutboxEventJpaRepository.tamperPayload(outboxEventId, corruptedPayload);
   }
 }
