@@ -38,6 +38,7 @@ Spring Boot의 환경변수 relaxed binding은 `.`과 `-` 둘 다 단어 경계�
 | `CORS_ALLOWED_ORIGINS` | `cors.allowed-origins` | `http://localhost:5173`, `http://localhost:3000` | **필수** | silent | 관리자 프론트엔드가 호출을 허용받을 오리진 목록. 실제 관리자 프론트엔드 배포 도메인으로 교체 필요 — 안 바꾸면 앱은 정상 기동하지만, 등록 안 된 오리진에서의 요청은 서버 로그 없이 브라우저 단에서 CORS 에러로만 조용히 막힘. 리스트형 값이라 콤마 구분 문자열(`CORS_ALLOWED_ORIGINS=https://admin.example.com,https://admin2.example.com`)로 오버라이드 가능 — relaxed binding이 `List<String>`으로 정상 바인딩되는지 실제 프리플라이트 요청으로 검증 완료(env var에만 있는 오리진은 허용되고, yaml 기본값에만 있던 오리진은 env var가 있으면 사라짐 — merge가 아니라 override) |
 | `JWT_SECRET` | `jwt.secret` | `local-dev-only-jwt-signing-secret-change-in-production-32bytes-min`(66바이트, 528비트 — HS256 최소 요구치인 256비트/32바이트는 충족하지만 이름 그대로 로컬 전용 더미값) | **필수** | **silent-breach** | 안 바꾸면 앱은 정상 기동하고 로그인도 정상 동작하는 것처럼 보이지만, 이 문자열이 공개 저장소에 커밋되어 있는 값이라 **누구나 같은 시크릿으로 유효한 관리자 JWT를 직접 위조해 서명할 수 있음** — 인증 자체가 사실상 없는 것과 동일한 상태가 됨. loud도 silent도 아닌 이유: silent는 "틀린 값 때문에 기능이 저하"되는 것이지만 이건 "값이 새어나가 있어서 인증 경계 자체가 무의미"해지는 것 — 겉보기엔 완벽하게 정상 동작해서 침해 여부를 앱 로그만 봐서는 절대 알 수 없음. **배포 전 반드시 별도로 생성한 고엔트로피 시크릿으로 교체할 것**(예: `openssl rand -base64 48`) |
 | `ADMIN_INITIAL_USERNAME` / `ADMIN_INITIAL_PASSWORD` | `admin.initial.username` / `admin.initial.password` | 없음(yaml 기본값 미설정 — 둘 다 비어있으면 `AdminUserSeeder`가 계정 생성 자체를 스킵) | **필수(최초 배포 1회만)** | **silent-breach** | 로컬 개발 문서/README 등에 예시로 적어둔 값을 그대로 프로덕션에 써서 배포하면, 그 값이 곧 "알려진 관리자 계정"이 되어 누구나 로그인 가능 — 이것도 앱은 정상 기동/정상 동작하므로 겉보기엔 문제가 없어 보임. 최초 1회 생성 이후에는 이 값을 바꿔도 이미 만들어진 계정 자체는 안 바뀜(`AdminUserSeeder`는 idempotent — username이 이미 존재하면 skip)이므로, 초기 배포 시점에만 강한 값을 넣는 것으로 충분하지만 그 순간이 가장 중요함 |
+| `DEMO_ACCOUNT_USERNAME` / `DEMO_ACCOUNT_PASSWORD` | `demo.account.username` / `demo.account.password` | 없음(yaml 기본값 미설정 — 둘 다 비어있으면 `DemoAccountSeeder`가 계정 생성 자체를 스킵) | 필수 아님(데모 환경만 해당) | N/A | **이 계정 정보는 데모 프론트엔드에 공개적으로 노출되는 것이 의도된 설계다** — `role=DEMO`로 생성되며 `/api/v1/demo/**` 외 운영 엔드포인트에는 `hasRole("ADMIN")`에 막혀 403으로 거부된다. 나중에 이 값이 그대로 공개된 걸 보고 "왜 비밀번호가 유출됐냐"고 오인하지 말 것 — `ADMIN_INITIAL_*`(위 항목)와 달리 silent-breach가 아니다. `AdminUserSeeder`와 동일하게 idempotent(username이 이미 존재하면 skip)이며, 두 시더는 서로 다른 username·설정 프리픽스를 쓰기 때문에 실행 순서와 무관하게 독립적으로 동작한다 |
 | `APPROVAL_THRESHOLD` | `approval.threshold` | `10000000` | 필수 아님(업무 정책값) | N/A | Maker-Checker 승인이 필요해지는 금액 기준. 값이 틀려도 앱은 정상 동작, 업무 정책만 달라짐 |
 | `FRAUD_THRESHOLD` | `fraud.threshold` | `50000000` | 필수 아님(업무 정책값) | N/A | 이상거래 탐지 임계치. 상동 |
 | `EOD_BATCH_CRON` | `eod.batch.cron` | `"0 0 2 * * *"` | 필수 아님 | N/A | EOD 정산 배치 트리거 시각. 스테이징/프로덕션에서 다른 시각이 필요하면 이 값만 바꾸면 됨 |
@@ -80,6 +81,13 @@ Spring Boot의 환경변수 relaxed binding은 `.`과 `-` 둘 다 단어 경계�
   ```
   이 파일은 전부 `CREATE TABLE IF NOT EXISTS`/`CREATE SEQUENCE IF NOT EXISTS`라 이미 적용된 환경에서 다시 실행해도 안전합니다(idempotent) — 여러 환경에 걸쳐 반복 적용해도 되고, 실수로 두 번 적용해도 무해합니다.
   - **이 DDL을 깜빡했을 때의 실패 시점 — 다른 스키마 변경과 다름**: 위 `execution_status` 컬럼 추가는 `ddl-auto: validate`가 즉시 잡아내 기동 자체가 loud하게 실패하지만, 이 테이블들은 JPA `@Entity`가 아니라서 `ddl-auto`/`validate` 검증 대상이 아닙니다. 앱은 정상 기동하고, **배치 Job이 처음 실행되거나 관리자가 `GET /api/v1/batch-jobs/{jobName}/executions`를 처음 호출하는 시점**에야 `relation "batch_job_instance" does not exist`(또는 유사한 SQL 에러)로 뒤늦게 드러납니다 — 배포 직후 반드시 이 엔드포인트를 한 번 호출해 확인할 것.
+
+- **`feat/demo-role-authorization`(DEMO 역할 도입)** — `admin_users.role` 컬럼의 기존 CHECK 제약(`role = 'ADMIN'`)이 `AdminRole.DEMO` 신규 값을 막습니다. 배포 전 프로덕션 DB에 아래 DDL을 먼저 적용할 것:
+  ```sql
+  ALTER TABLE admin_users DROP CONSTRAINT admin_users_role_check;
+  ALTER TABLE admin_users ADD CONSTRAINT admin_users_role_check CHECK (role IN ('ADMIN','DEMO'));
+  ```
+  이 컬럼은 `@Enumerated(EnumType.STRING)`이라 `ddl-auto: validate`가 컬럼 존재/타입만 검증하고 CHECK 제약 내용까지는 검증하지 않습니다 — 안 하면 앱은 정상 기동하지만, `DemoAccountSeeder`가 `role='DEMO'`로 계정을 저장하려는 첫 시도에서 `DataIntegrityViolationException`(CHECK 제약 위반, SQLState `23514`)이 나고, 현재 `AdminUserPersistenceAdapter.save()`는 이 예외를 `DuplicateAdminUsernameException`으로 잘못 번역해 로그만 봐서는 "이미 존재하는 계정"으로 오인하기 쉽습니다(실제로는 계정이 없는데도 발생) — 원인이 CHECK 제약이라는 걸 알아두면 헤맬 필요 없음. `admin_users` 테이블은 운영 DB에만 있고 데모 DB에는 없으므로(인증은 운영 DB 공유) 이 DDL은 운영 DB 1곳에만 적용하면 됩니다.
 
 ### 데모 DB
 
